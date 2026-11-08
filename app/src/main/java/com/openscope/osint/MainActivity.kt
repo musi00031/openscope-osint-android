@@ -169,12 +169,14 @@ fun HomeScreen(
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Новое исследование", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     Text("Пассивный анализ публичных источников. Результаты обрабатываются на устройстве; для запросов к открытым источникам нужен интернет.", color = Muted, fontSize = 12.sp)
-                    OutlinedTextField(value = query, onValueChange = onQuery, modifier = Modifier.fillMaxWidth(), label = { Text("Никнейм, email или домен") }, singleLine = true)
+                    OutlinedTextField(value = query, onValueChange = onQuery, modifier = Modifier.fillMaxWidth(), label = { Text("Объект исследования") }, singleLine = true)
                     Text("Тип исследования", color = Muted, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilterChip(selected == "username", { onSelected("username") }, label = { Text("Никнейм") })
                         FilterChip(selected == "email", { onSelected("email") }, label = { Text("Email") })
                         FilterChip(selected == "domain", { onSelected("domain") }, label = { Text("Домен") })
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilterChip(selected == "ip", { onSelected("ip") }, label = { Text("IP") })
                         FilterChip(selected == "url", { onSelected("url") }, label = { Text("URL") })
                         FilterChip(selected == "image", { onSelected("image") }, label = { Text("Фото") })
@@ -229,7 +231,7 @@ fun HomeScreen(
             }
         }
         item { Text("Инструменты", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
-        items(modules.take(4)) { module -> ModuleCard(module) }
+        items(modules) { module -> ModuleCard(module) }
         item { Spacer(Modifier.height(8.dp)) }
     }
 }
