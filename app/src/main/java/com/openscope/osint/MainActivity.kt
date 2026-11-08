@@ -224,7 +224,7 @@ fun HomeScreen(
                         Text("PUBLIC SOURCE INTELLIGENCE", color = Silver, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                         Text("Поиск • корреляция • проверка • отчёт", color = Muted, fontSize = 11.sp)
                     }
-                    Icon(Icons.Default.Radar, contentDescription = null, tint = SignalRed, modifier = Modifier.size(27.dp))
+                    Icon(Icons.Default.Hub, contentDescription = null, tint = SignalRed, modifier = Modifier.size(27.dp))
                 }
             }
         }
