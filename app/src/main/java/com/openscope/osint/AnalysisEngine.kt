@@ -15,7 +15,8 @@ data class Finding(
     val title: String,
     val value: String,
     val detail: String,
-    val level: String = "info"
+    val level: String = "info",
+    val section: String = "general"
 )
 
 data class AnalysisResult(
@@ -27,6 +28,7 @@ data class AnalysisResult(
 )
 
 object AnalysisEngine {
+    private val publicSearchGate = Semaphore(6)
     suspend fun run(type: String, raw: String, context: Context): AnalysisResult = withContext(Dispatchers.IO) {
         val value = raw.trim()
         when (type) {
@@ -129,35 +131,34 @@ object AnalysisEngine {
         require(handle.matches(Regex("[A-Za-z0-9._-]{2,40}"))) {
             "Введите публичный никнейм: 2–40 символов, латиница, цифры, точка, дефис или подчёркивание."
         }
-        data class SocialTarget(val name: String, val domains: Set<String>, val query: String, val directUrl: String)
+        data class SocialTarget(val name: String, val domains: Set<String>, val queries: List<String>, val directUrl: String)
         val h = handle.lowercase(Locale.ROOT)
         val targets = listOf(
-            SocialTarget("Telegram", setOf("t.me", "telegram.me"), "site:t.me \"$handle\" OR site:telegram.me \"$handle\"", "https://t.me/$handle"),
-            SocialTarget("Instagram", setOf("instagram.com"), "site:instagram.com \"$handle\" OR site:instagram.com/@$handle", "https://www.instagram.com/$handle/"),
-            SocialTarget("TikTok", setOf("tiktok.com"), "site:tiktok.com/@$handle OR site:tiktok.com \"$handle\"", "https://www.tiktok.com/@$handle"),
-            SocialTarget("Facebook", setOf("facebook.com"), "site:facebook.com \"$handle\"", "https://www.facebook.com/$handle"),
-            SocialTarget("YouTube", setOf("youtube.com"), "site:youtube.com/@$handle OR site:youtube.com \"$handle\"", "https://www.youtube.com/@$handle"),
-            SocialTarget("VK", setOf("vk.com"), "site:vk.com \"$handle\"", "https://vk.com/$handle"),
-            SocialTarget("X / Twitter", setOf("x.com", "twitter.com"), "site:x.com \"$handle\" OR site:twitter.com \"$handle\"", "https://x.com/$handle"),
-            SocialTarget("Threads", setOf("threads.net"), "site:threads.net/@$handle OR site:threads.net \"$handle\"", "https://www.threads.net/@$handle"),
-            SocialTarget("LinkedIn", setOf("linkedin.com"), "site:linkedin.com/in/ \"$handle\"", "https://www.linkedin.com/in/$handle/"),
-            SocialTarget("Pinterest", setOf("pinterest.com"), "site:pinterest.com \"$handle\"", "https://www.pinterest.com/$handle/"),
-            SocialTarget("Twitch", setOf("twitch.tv"), "site:twitch.tv \"$handle\"", "https://www.twitch.tv/$handle"),
-            SocialTarget("Reddit", setOf("reddit.com"), "site:reddit.com/user \"$handle\" OR site:reddit.com/u \"$handle\"", "https://www.reddit.com/user/$handle/"),
-            SocialTarget("GitHub", setOf("github.com"), "site:github.com \"$handle\"", "https://github.com/$handle"),
-            SocialTarget("Medium", setOf("medium.com"), "site:medium.com/@$handle OR site:medium.com \"$handle\"", "https://medium.com/@$handle")
+            SocialTarget("Telegram", setOf("t.me", "telegram.me"), listOf("site:t.me \"$handle\"", "site:telegram.me \"$handle\"", "site:t.me $handle"), "https://t.me/$handle"),
+            SocialTarget("Instagram", setOf("instagram.com"), listOf("site:instagram.com/$handle", "site:instagram.com \"$handle\"", "site:instagram.com $handle"), "https://www.instagram.com/$handle/"),
+            SocialTarget("TikTok", setOf("tiktok.com"), listOf("site:tiktok.com/@$handle", "site:tiktok.com \"$handle\""), "https://www.tiktok.com/@$handle"),
+            SocialTarget("Facebook", setOf("facebook.com"), listOf("site:facebook.com \"$handle\"", "site:facebook.com $handle"), "https://www.facebook.com/$handle"),
+            SocialTarget("YouTube", setOf("youtube.com"), listOf("site:youtube.com/@$handle", "site:youtube.com \"$handle\""), "https://www.youtube.com/@$handle"),
+            SocialTarget("VK", setOf("vk.com"), listOf("site:vk.com \"$handle\"", "site:vk.com $handle"), "https://vk.com/$handle"),
+            SocialTarget("X / Twitter", setOf("x.com", "twitter.com"), listOf("site:x.com \"$handle\"", "site:twitter.com \"$handle\""), "https://x.com/$handle"),
+            SocialTarget("Threads", setOf("threads.net"), listOf("site:threads.net/@$handle", "site:threads.net \"$handle\""), "https://www.threads.net/@$handle"),
+            SocialTarget("LinkedIn", setOf("linkedin.com"), listOf("site:linkedin.com/in/$handle", "site:linkedin.com \"$handle\""), "https://www.linkedin.com/in/$handle/"),
+            SocialTarget("Pinterest", setOf("pinterest.com"), listOf("site:pinterest.com/$handle", "site:pinterest.com \"$handle\""), "https://www.pinterest.com/$handle/"),
+            SocialTarget("Twitch", setOf("twitch.tv"), listOf("site:twitch.tv/$handle", "site:twitch.tv \"$handle\""), "https://www.twitch.tv/$handle"),
+            SocialTarget("Reddit", setOf("reddit.com"), listOf("site:reddit.com/user/$handle", "site:reddit.com/u/$handle", "site:reddit.com \"$handle\""), "https://www.reddit.com/user/$handle/"),
+            SocialTarget("GitHub", setOf("github.com"), listOf("site:github.com/$handle", "site:github.com \"$handle\""), "https://github.com/$handle"),
+            SocialTarget("Medium", setOf("medium.com"), listOf("site:medium.com/@$handle", "site:medium.com \"$handle\""), "https://medium.com/@$handle")
         )
         val gate = Semaphore(5)
         val results = targets.map { target ->
             async(Dispatchers.IO) {
                 gate.withPermit {
-                    target to searchPublicPages("Публичный поиск · ${target.name}", target.query)
+                    target to searchPublicPages("Публичный поиск · " + target.name, target.queries)
                 }
             }
         }.awaitAll()
         val findings = mutableListOf<Finding>()
         var profileCandidates = 0
-        var mentions = 0
         results.forEach { (target, hits) ->
             val unique = hits.distinctBy { it.url.substringBefore("#").trimEnd('/').lowercase(Locale.ROOT) }
             val profileHits = mutableListOf<SearchHit>()
@@ -178,36 +179,67 @@ object AnalysisEngine {
                     else -> false
                 }
                 if (hostMatches && pathMatch) profileHits += hit
-                else if ((hit.title + " " + hit.snippet).contains(handle, true)) mentionHits += hit
+                else if ((hit.title + " " + hit.snippet + " " + hit.url).contains(handle, true)) mentionHits += hit
             }
             profileHits.take(5).forEach { hit ->
                 profileCandidates++
-                findings += Finding(target.name + " · кандидат профиля", hit.title,
-                    listOf(hit.url, hit.snippet, "Совпадает домен и путь публичной страницы с никнеймом. Это не подтверждает личность владельца.")
-                        .filter { it.isNotBlank() }.joinToString("\n"), "good")
+                findings += Finding(target.name, hit.title,
+                    listOf(hit.url, hit.snippet, "URL совпадает с шаблоном профиля и никнеймом. Это кандидат, а не подтверждение личности или доступности аккаунта.")
+                        .filter { it.isNotBlank() }.joinToString("\n"), "good", "social")
             }
-            if (profileHits.isEmpty() && mentionHits.isNotEmpty()) {
-                mentionHits.take(3).forEach { hit ->
-                    mentions++
-                    findings += Finding(target.name + " · упоминание", hit.title,
-                        listOf(hit.url, hit.snippet, "Никнейм встречается в индексируемом тексте, но URL не подтверждает профиль с таким именем.")
-                            .filter { it.isNotBlank() }.joinToString("\n"), "info")
-                }
+            mentionHits.filterNot { candidate -> profileHits.any { it.url == candidate.url } }.take(2).forEach { hit ->
+                findings += Finding(target.name + " · упоминание", hit.title,
+                    listOf(hit.url, hit.snippet, "Никнейм найден в индексируемом результате; ссылка не подтверждает профиль с таким именем.")
+                        .filter { it.isNotBlank() }.joinToString("\n"), "info", "mentions")
             }
             if (profileHits.isEmpty() && mentionHits.isEmpty()) {
-                findings += Finding(target.name, "Публичный результат не найден",
-                    "Поисковая выдача не вернула страницу с точным путём профиля или явным упоминанием. Площадка может не индексироваться или ограничивать просмотр.", "info")
+                findings += Finding(target.name, "В индексах не найдено",
+                    "DuckDuckGo и Bing не вернули совпадающую публичную страницу. Это не проверка существования аккаунта: закрытые профили могут не индексироваться, а поисковики могут скрывать или устаревать результаты.", "info", "social")
             }
         }
+
+        val globalQueries = listOf(
+            "\"$handle\"",
+            "$handle Украина OR Україна OR Днепр OR Одесса",
+            "\"$handle\" новости OR новини OR форум OR публикация",
+            "\"$handle\" site:zmina.info OR site:pravda.com.ua OR site:suspilne.media OR site:hromadske.ua OR site:unian.ua OR site:ukrinform.ua OR site:nv.ua OR site:liga.net OR site:24tv.ua OR site:tsn.ua OR site:focus.ua OR site:censor.net OR site:obozrevatel.com OR site:korrespondent.net"
+        )
+        val globalHits = searchPublicPages("Упоминания в открытом интернете", globalQueries)
+            .distinctBy { it.url.substringBefore("#").trimEnd('/').lowercase(Locale.ROOT) }
+        val newsDomains = setOf(
+            "zmina.info", "pravda.com.ua", "suspilne.media", "hromadske.ua", "unian.ua",
+            "ukrinform.ua", "nv.ua", "liga.net", "24tv.ua", "tsn.ua", "focus.ua",
+            "censor.net", "obozrevatel.com", "korrespondent.net", "babel.ua",
+            "radiosvoboda.org", "zn.ua", "detector.media", "apostrophe.ua"
+        )
+        var newsCount = 0
+        var webMentionCount = 0
+        globalHits.filter { (it.title + " " + it.snippet + " " + it.url).contains(handle, true) || it.url.contains(h, true) }
+            .take(30).forEach { hit ->
+                val host = runCatching { URL(hit.url).host.lowercase(Locale.ROOT).removePrefix("www.") }.getOrDefault("")
+                val isNews = newsDomains.any { host == it || host.endsWith(".$it") }
+                if (isNews) newsCount++ else webMentionCount++
+                findings += Finding(
+                    if (isNews) "Новостное издание" else "Открытый интернет",
+                    hit.title,
+                    listOf(hit.url, hit.snippet, "Совпадение найдено поисковым индексом по никнейму; контекст и принадлежность упоминания нужно проверить вручную.")
+                        .filter { it.isNotBlank() }.joinToString("\n"),
+                    if (isNews) "good" else "info",
+                    "mentions"
+                )
+            }
+        findings += Finding("Сводка социальных сетей", "$profileCandidates кандидатов профиля",
+            "Проверены 14 платформ через несколько вариантов поискового запроса на каждую. Кандидат — только индексируемая публичная ссылка с подходящим путём.", "info", "social")
+        findings += Finding("Сводка упоминаний", "Новости: $newsCount · прочий интернет: $webMentionCount",
+            "Отдельно выполнен общий поиск по точному нику, украинским вариантам запроса и ряду украинских СМИ. Отсутствие совпадений не доказывает отсутствие публикаций.", "info", "mentions")
         findings += Finding("Прямые адреса профилей", "Сформированы, не проверены",
             targets.joinToString("\n") { it.name + ": " + it.directUrl } +
-                "\nЭто шаблоны адресов для ручной проверки, а не подтверждение существования аккаунтов.", "warn")
-        AnalysisResult(handle, "Social Media OSINT",
-            "Проверено ${targets.size} платформ; кандидатов профиля: $profileCandidates; отдельных упоминаний: $mentions",
+                "\nЭто адреса для ручного открытия. Само формирование ссылки не подтверждает существование профиля.", "warn", "social")
+        AnalysisResult(handle, "Social + Web Mentions OSINT",
+            "Платформ: " + targets.size + "; кандидатов профиля: " + profileCandidates + "; новостных упоминаний: " + newsCount + "; прочих веб-упоминаний: " + webMentionCount,
             findings,
-            "Пассивный поиск публично индексируемых страниц в Telegram, Instagram, TikTok, Facebook, YouTube, VK, X, Threads, LinkedIn, Pinterest, Twitch, Reddit, GitHub и Medium. Кандидат профиля засчитывается только при совпадении домена площадки и сегмента URL с никнеймом; текстовые упоминания вынесены отдельно. Ни один результат не устанавливает личность владельца. Закрытые аккаунты, приватные чаты, скрытые подписчики и данные за авторизацией не проверяются. Никнейм отправляется поисковой системе DuckDuckGo.")
+            "Отчёт разделяет кандидатов публичных профилей в социальных сетях и текстовые упоминания никнейма в СМИ/открытом интернете. Поиск выполняется по публичным индексам DuckDuckGo и Bing несколькими вариантами запросов. Закрытый Instagram-профиль может быть найден только если поисковик ранее проиндексировал его публичную страницу; приватное содержимое, подписчики и публикации за авторизацией не извлекаются. Если результат не найден, это означает только отсутствие результата в проверенных индексах, а не отсутствие аккаунта или публикаций. Совпадения не устанавливают личность владельца.")
     }
-
     private suspend fun ukraineRegistry(raw: String): AnalysisResult = coroutineScope {
         val subject = raw.trim().replace(Regex("""\s+"""), " ")
         require(subject.length in 3..120 && subject.matches(Regex("""[\p{L}\p{N} .’'&()_-]+"""))) {
@@ -460,15 +492,19 @@ object AnalysisEngine {
                 if (language == "ru") "Википедия RU" else "Википедия EN")
         }
     }
-    private suspend fun searchPublicPages(category: String, query: String): List<SearchHit> = coroutineScope {
-        // Do not depend on one search provider or one HTML template. Both providers
-        // are public-web indexes; a zero-result response is not proof of absence.
-        val ddg = async(Dispatchers.IO) { searchDuckDuckGo(category, query) }
-        val bing = async(Dispatchers.IO) { searchBingRss(category, query) }
-        (runCatching { ddg.await() }.getOrDefault(emptyList()) +
-            runCatching { bing.await() }.getOrDefault(emptyList()))
+    private suspend fun searchPublicPages(category: String, query: String): List<SearchHit> =
+        searchPublicPages(category, listOf(query))
+
+    private suspend fun searchPublicPages(category: String, queries: List<String>): List<SearchHit> = coroutineScope {
+        val jobs = queries.take(4).flatMap { query ->
+            listOf(
+                async(Dispatchers.IO) { publicSearchGate.withPermit { searchDuckDuckGo(category, query) } },
+                async(Dispatchers.IO) { publicSearchGate.withPermit { searchBingRss(category, query) } }
+            )
+        }
+        jobs.awaitAll().flatten()
             .distinctBy { it.url.substringBefore("#").trimEnd('/').lowercase(Locale.ROOT) }
-            .take(40)
+            .take(60)
     }
 
     private fun searchDuckDuckGo(category: String, query: String): List<SearchHit> {
