@@ -132,7 +132,11 @@ object AnalysisEngine {
             async(Dispatchers.IO) { wikidataPages(cleanName, language) }
         }.awaitAll().flatten()
         val newsPages = async(Dispatchers.IO) { gdeltNews(cleanName) }.await()
-        val pages = webPages + encyclopediaPages + knowledgePages + newsPages
+        val scholarlyPages = listOf(
+            async(Dispatchers.IO) { openAlexAuthors(cleanName) },
+            async(Dispatchers.IO) { crossrefWorks(cleanName) }
+        ).awaitAll().flatten()
+        val pages = webPages + encyclopediaPages + knowledgePages + newsPages + scholarlyPages
         val unique = linkedMapOf<String, SearchHit>()
         pages.forEach { hit ->
             val key = hit.url.substringBefore("#").trimEnd('/').lowercase(Locale.ROOT)
@@ -174,6 +178,37 @@ object AnalysisEngine {
             "Поиск выполняется по открытой веб-выдаче DuckDuckGo, Wikipedia RU/EN, Wikidata RU/EN и новостному индексу GDELT. Результаты дедуплицируются по URL и группируются по доменам. Это список публичных публикаций и упоминаний, а не установление личности. Однофамильцы и разные люди с одинаковым именем могут присутствовать одновременно. Уровень достоверности не повышается только из-за количества ссылок: важно проверить независимость источников и контекст каждой публикации. Запрос имени передаётся поисковой системе. Модуль не ищет домашние адреса, частные контакты, родственников, скрытые аккаунты или местоположение человека.")
     }
 
+    private fun openAlexAuthors(name: String): List<SearchHit> {
+        val address = "https://api.openalex.org/authors?search=" + URLEncoder.encode(name, "UTF-8") + "&per-page=8"
+        val json = getJson(address) ?: return emptyList()
+        val rows = json.optJSONArray("results") ?: return emptyList()
+        return (0 until rows.length()).mapNotNull { index ->
+            val item = rows.optJSONObject(index) ?: return@mapNotNull null
+            val label = item.optString("display_name").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val id = item.optString("id")
+            if (!id.startsWith("https://openalex.org/")) return@mapNotNull null
+            val works = item.optInt("works_count", 0)
+            val orcid = item.optString("orcid")
+            val institution = item.optJSONArray("last_known_institutions")?.optJSONObject(0)?.optString("display_name").orEmpty()
+            val detail = listOf(if (works > 0) "Публикаций в индексе: $works" else "", institution, orcid).filter { it.isNotBlank() }.joinToString(" · ")
+            SearchHit(label, id, detail, "OpenAlex Authors")
+        }
+    }
+
+    private fun crossrefWorks(name: String): List<SearchHit> {
+        val address = "https://api.crossref.org/works?query.author=" + URLEncoder.encode(name, "UTF-8") + "&rows=10&select=title,author,DOI,published,container-title"
+        val json = getJson(address) ?: return emptyList()
+        val rows = json.optJSONObject("message")?.optJSONArray("items") ?: return emptyList()
+        return (0 until rows.length()).mapNotNull { index ->
+            val item = rows.optJSONObject(index) ?: return@mapNotNull null
+            val title = item.optJSONArray("title")?.optString(0).orEmpty().takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val doi = item.optString("DOI")
+            if (doi.isBlank()) return@mapNotNull null
+            val publication = item.optJSONArray("container-title")?.optString(0).orEmpty()
+            val year = item.optJSONObject("published")?.optJSONArray("date-parts")?.optJSONArray(0)?.optInt(0)?.takeIf { it > 0 }?.toString().orEmpty()
+            SearchHit(title, "https://doi.org/" + doi, listOf(publication, year).filter { it.isNotBlank() }.joinToString(" · "), "Crossref Publications")
+        }
+    }
     private fun wikidataPages(name: String, language: String): List<SearchHit> {
         val query = "https://www.wikidata.org/w/api.php?action=wbsearchentities&search=" +
             URLEncoder.encode(name, "UTF-8") + "&language=" + language + "&uselang=" + language + "&format=json&limit=8"
