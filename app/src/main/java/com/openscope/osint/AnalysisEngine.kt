@@ -138,7 +138,7 @@ object AnalysisEngine {
         val results = targets.map { target ->
             async(Dispatchers.IO) {
                 gate.withPermit {
-                    target to searchPublicPages("Публичный поиск · \${target.name}", target.query)
+                    target to searchPublicPages("Публичный поиск · ${target.name}", target.query)
                 }
             }
         }.awaitAll()
@@ -190,7 +190,7 @@ object AnalysisEngine {
             targets.joinToString("\n") { it.name + ": " + it.directUrl } +
                 "\nЭто шаблоны адресов для ручной проверки, а не подтверждение существования аккаунтов.", "warn")
         AnalysisResult(handle, "Social Media OSINT",
-            "Проверено \${targets.size} платформ; кандидатов профиля: $profileCandidates; отдельных упоминаний: $mentions",
+            "Проверено ${targets.size} платформ; кандидатов профиля: $profileCandidates; отдельных упоминаний: $mentions",
             findings,
             "Пассивный поиск публично индексируемых страниц в Telegram, Instagram, TikTok, Facebook, YouTube, VK, X, Threads, LinkedIn, Pinterest, Twitch, Reddit, GitHub и Medium. Кандидат профиля засчитывается только при совпадении домена площадки и сегмента URL с никнеймом; текстовые упоминания вынесены отдельно. Ни один результат не устанавливает личность владельца. Закрытые аккаунты, приватные чаты, скрытые подписчики и данные за авторизацией не проверяются. Никнейм отправляется поисковой системе DuckDuckGo.")
     }
@@ -223,7 +223,7 @@ object AnalysisEngine {
         val results = targets.map { target ->
             async(Dispatchers.IO) {
                 gate.withPermit {
-                    target to searchPublicPages("Украина · \${target.name}", target.query)
+                    target to searchPublicPages("Украина · ${target.name}", target.query)
                 }
             }
         }.awaitAll()
@@ -261,7 +261,7 @@ object AnalysisEngine {
         findings += Finding("Проверка достоверности", "Поисковая выдача не является официальной выпиской",
             "OpenScope показывает ссылки и фрагменты поисковой выдачи. Статус компании, судебное решение, закупку или транзакцию нужно подтверждать первичным документом; учитывайте дату и контекст публикации.", "warn")
         AnalysisResult(subject, "Ukraine Public Records OSINT",
-            "Проверено \${targets.size} источников; получено индексируемых публичных страниц: $indexedPages",
+            "Проверено ${targets.size} источников; получено индексируемых публичных страниц: $indexedPages",
             findings,
             "Модуль ориентирован на юридические лица и организации Украины. Источники: Opendatabot, YouControl, Clarity Project, Prozorro, Spending.gov.ua, data.gov.ua, SMIDA, Минюст/ЕГР, публичный судебный реестр, Dozorro, АМКУ, НБУ и DREAM. Используется поиск публичных страниц, а не закрытые базы и не авторизованные кабинеты. Поисковый запрос передаётся DuckDuckGo. Совпадение названия не доказывает связь с конкретным лицом.")
     }
