@@ -56,7 +56,7 @@ fun OpenScopeApp() {
     var result by remember { mutableStateOf<AnalysisResult?>(null) }
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("openscope_local", android.content.Context.MODE_PRIVATE) }
-    var history by remember { mutableStateOf(prefs.getString("history", "")?.split("\\n")?.filter { it.isNotBlank() } ?: emptyList()) }
+    var history by remember { mutableStateOf(prefs.getString("history", "")?.split("\n")?.filter { it.isNotBlank() } ?: emptyList()) }
     val scope = rememberCoroutineScope()
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
@@ -69,7 +69,7 @@ fun OpenScopeApp() {
                     result = analysis
                     val stamp = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
                     history = listOf("$stamp • ${analysis.module} • ${analysis.subject}") + history
-                    prefs.edit().putString("history", history.joinToString("\\n")).apply()
+                    prefs.edit().putString("history", history.joinToString("\n")).apply()
                     status = "Анализ изображения завершён"
                 } catch (e: Exception) { status = e.message ?: "Не удалось прочитать файл" }
                 finally { loading = false }
@@ -79,9 +79,9 @@ fun OpenScopeApp() {
     val modules = remember {
         listOf(
             OsintModule("username", "Username OSINT", "До 400 публичных площадок по правилам WhatsMyName", "Идентификаторы", "Работает"),
-            OsintModule("person", "Поиск человека", "DuckDuckGo, Wikipedia, Wikidata и GDELT — публичные упоминания", "Идентификаторы", "Работает"),
-            OsintModule("email", "Email OSINT", "Синтаксис адреса и DNS/MX домена почты", "Идентификаторы", "Работает"),
-            OsintModule("domain", "Domain OSINT", "DNS A/AAAA/MX/NS/TXT/CAA и RDAP", "Инфраструктура", "Работает"),
+            OsintModule("person", "Поиск человека", "DuckDuckGo, Wikipedia, Wikidata, GDELT, OpenAlex и Crossref", "Идентификаторы", "Работает"),
+            OsintModule("email", "Email OSINT", "Формат, MX, SPF и DMARC домена почты", "Идентификаторы", "Работает"),
+            OsintModule("domain", "Domain OSINT", "DNS, RDAP и Certificate Transparency", "Инфраструктура", "Работает"),
             OsintModule("ip", "IP OSINT", "Публичная геолокация, ASN и провайдер", "Инфраструктура", "Работает"),
             OsintModule("url", "URL Analysis", "Разбор URL и HTTP-доступность", "Инфраструктура", "Работает"),
             OsintModule("image", "Image & Metadata", "Локальный EXIF, GPS и SHA-256", "Медиа", "Работает"),
