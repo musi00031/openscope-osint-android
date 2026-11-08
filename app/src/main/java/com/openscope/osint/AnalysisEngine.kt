@@ -520,11 +520,11 @@ object AnalysisEngine {
             val normalized = body.lowercase(Locale.ROOT)
             val h = handle.lowercase(Locale.ROOT)
             val explicitProfileMarker = when (platform) {
-                "Instagram" -> normalized.contains("\\\"username\\\":\\\"$h\\\"") ||
-                    normalized.contains("\\\"profilepage_$h\\\"") ||
-                    (normalized.contains("instagram") && normalized.contains("\\\"$h\\\"") && normalized.contains("profile"))
-                "TikTok" -> normalized.contains("\\\"uniqueid\\\":\\\"$h\\\"") ||
-                    normalized.contains("\\\"unique_id\\\":\\\"$h\\\"")
+                "Instagram" -> normalized.contains("\"username\":\"$h\"") ||
+                    normalized.contains("\"profilepage_$h\"") ||
+                    (normalized.contains("instagram") && normalized.contains("\"$h\"") && normalized.contains("profile"))
+                "TikTok" -> normalized.contains("\"uniqueid\":\"$h\"") ||
+                    normalized.contains("\"unique_id\":\"$h\"")
                 "Telegram" -> normalized.contains("tgme_page_username") && normalized.contains(h)
                 else -> false
             }
