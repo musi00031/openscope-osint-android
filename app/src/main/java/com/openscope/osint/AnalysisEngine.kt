@@ -28,6 +28,7 @@ object AnalysisEngine {
         val value = raw.trim()
         when (type) {
             "username" -> username(value)
+            "person" -> person(value)
             "email" -> email(value)
             else -> domain(value)
         }
@@ -40,7 +41,19 @@ object AnalysisEngine {
             "Reddit" to "https://www.reddit.com/user/$name/",
             "GitLab" to "https://gitlab.com/$name",
             "Pinterest" to "https://www.pinterest.com/$name/",
-            "Medium" to "https://medium.com/@$name"
+            "Medium" to "https://medium.com/@$name",
+            "TikTok" to "https://www.tiktok.com/@$name",
+            "Instagram" to "https://www.instagram.com/$name/",
+            "X" to "https://x.com/$name",
+            "Twitch" to "https://www.twitch.tv/$name",
+            "YouTube" to "https://www.youtube.com/@$name",
+            "Telegram" to "https://t.me/$name",
+            "Steam" to "https://steamcommunity.com/id/$name",
+            "SoundCloud" to "https://soundcloud.com/$name",
+            "DEV" to "https://dev.to/$name",
+            "Keybase" to "https://keybase.io/$name",
+            "Hacker News" to "https://news.ycombinator.com/user?id=$name",
+            "About.me" to "https://about.me/$name"
         )
         val findings = sites.map { (site, address) ->
             val status = request(address)
@@ -58,6 +71,49 @@ object AnalysisEngine {
         return AnalysisResult(name, "Username OSINT", "Проверено источников: ${sites.size}; ответили: $found; неоднозначно: $uncertain", findings,
             "Проверены только публичные страницы профилей. HTTP 200 не доказывает, что аккаунт принадлежит одному человеку: некоторые сайты показывают заглушки или требуют авторизацию. Совпадение никнейма — лишь зацепка, а не подтверждение личности.")
     }
+
+    private fun person(name: String): AnalysisResult {
+        require(name.length in 3..80 && name.matches(Regex("[\\p{L}][\\p{L} .’'\\-]{1,78}[\\p{L}]"))) {
+            "Введите имя и фамилию (3–80 символов)."
+        }
+        val query = "\"" + name.trim() + "\""
+        val address = "https://html.duckduckgo.com/html/?q=" + URLEncoder.encode(query, "UTF-8")
+        val html = getText(address)
+        val links = mutableListOf<Pair<String, String>>()
+        if (html != null) {
+            val pattern = Regex("""<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL)
+            pattern.findAll(html).take(8).forEach { match ->
+                val href = decodeHtml(match.groupValues[1])
+                val title = stripHtml(match.groupValues[2])
+                if (href.startsWith("http") && title.isNotBlank() && !href.contains("duckduckgo.com")) links += title to href
+            }
+        }
+        val findings = mutableListOf<Finding>()
+        if (links.isEmpty()) findings += Finding("Публичный веб-поиск", "Результаты не получены", "Поисковик не вернул доступные результаты. Попробуйте уточнить написание имени или повторить позже.", "warn")
+        else links.forEachIndexed { index, item -> findings += Finding("Публичное упоминание " + (index + 1), item.first, item.second, "info") }
+        findings += Finding("Метод", "Поиск по точному имени", "Источник: DuckDuckGo HTML. Выдача может быть неполной и содержать однофамильцев.")
+        return AnalysisResult(name, "Поиск человека", "Найдено публичных веб-результатов: " + links.size + ". Это зацепки, а не установленная личность.", findings,
+            "Совпадение имени не подтверждает, что найденные страницы относятся к одному человеку. Нужны независимые совпадения из открытых источников. Модуль не ищет домашние адреса, закрытые контакты, пароли или местоположение человека. Запрос имени передаётся поисковой системе DuckDuckGo.")
+    }
+
+    private fun getText(address: String): String? {
+        val connection = runCatching { URL(address).openConnection() as HttpURLConnection }.getOrNull() ?: return null
+        return try {
+            connection.connectTimeout = 9000
+            connection.readTimeout = 9000
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36")
+            connection.setRequestProperty("Accept", "text/html")
+            if (connection.responseCode !in 200..299) return null
+            connection.inputStream.bufferedReader().use { it.readText() }
+        } catch (_: Exception) { null } finally { connection.disconnect() }
+    }
+
+    private fun stripHtml(value: String): String = decodeHtml(value.replace(Regex("<[^>]+>"), ""))
+        .replace(Regex("\\s+"), " ").trim()
+
+    private fun decodeHtml(value: String): String = value
+        .replace("&amp;", "&").replace("&quot;", "\"").replace("&#x27;", "'")
+        .replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ")
 
     private fun email(address: String): AnalysisResult {
         require(address.length <= 254 && address.matches(Regex("^[A-Za-z0-9.!#$%&'*+/=?^`{|}~-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"))) {
