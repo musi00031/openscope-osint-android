@@ -78,8 +78,10 @@ fun OpenScopeApp() {
     }
     val modules = remember {
         listOf(
-            OsintModule("username", "Username OSINT", "До 400 публичных площадок по правилам WhatsMyName", "Идентификаторы", "Работает"),
-            OsintModule("person", "Поиск человека", "DuckDuckGo, Wikipedia, Wikidata, GDELT, OpenAlex и Crossref", "Идентификаторы", "Работает"),
+            OsintModule("username", "Username OSINT", "До 400 площадок WhatsMyName + публичные совпадения", "Идентификаторы", "Работает"),
+            OsintModule("social", "Social Media OSINT", "Telegram, Instagram, TikTok, Facebook, VK, YouTube, X, Reddit, GitHub", "Социальные сети", "Работает"),
+            OsintModule("ukraine", "Ukraine Public Records", "Opendatabot, YouControl, Clarity, Prozorro, Spending, data.gov.ua, SMIDA", "Украина", "Работает"),
+            OsintModule("person", "Публичные упоминания", "DuckDuckGo, Wikipedia, Wikidata, GDELT, OpenAlex и Crossref", "Идентификаторы", "Работает"),
             OsintModule("email", "Email OSINT", "Формат, MX, SPF и DMARC домена почты", "Идентификаторы", "Работает"),
             OsintModule("domain", "Domain OSINT", "DNS, RDAP и Certificate Transparency", "Инфраструктура", "Работает"),
             OsintModule("ip", "IP OSINT", "Публичная геолокация, ASN и провайдер", "Инфраструктура", "Работает"),
@@ -158,7 +160,7 @@ fun OpenScopeApp() {
                                     result = analysis
                                     val stamp = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
                                     history = listOf("$stamp • ${analysis.module} • ${analysis.subject}") + history
-                                    prefs.edit().putString("history", history.joinToString("\\n")).apply()
+                                    prefs.edit().putString("history", history.joinToString("\n")).apply()
                                     status = "Анализ завершён"
                                 } catch (e: Exception) {
                                     status = e.message ?: "Не удалось выполнить анализ"
@@ -213,8 +215,14 @@ fun HomeScreen(
                         FilterChip(selected == "person", { onSelected("person") }, label = { Text("Человек") })
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(selected == "social", { onSelected("social") }, label = { Text("Соцсети") })
+                        FilterChip(selected == "ukraine", { onSelected("ukraine") }, label = { Text("Украина") })
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilterChip(selected == "image", { onSelected("image") }, label = { Text("Фото / EXIF") })
                     }
+                    if (selected == "social") Text("Вводи публичный никнейм без @. Поиск выполняется по открытой индексируемой выдаче; закрытые профили не проверяются.", color = Muted, fontSize = 11.sp)
+                    if (selected == "ukraine") Text("Вводи название компании, организации или код ЕГРПОУ. Модуль работает с публичными данными юридических лиц.", color = Muted, fontSize = 11.sp)
                     if (selected == "image") OutlinedButton(onClick = onPickImage, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Image, null); Spacer(Modifier.width(8.dp)); Text("Выбрать изображение") }
                     Button(onClick = onRun, enabled = !loading && selected != "image", modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
                         if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
