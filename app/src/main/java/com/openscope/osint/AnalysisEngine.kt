@@ -142,7 +142,27 @@ object AnalysisEngine {
             val key = hit.url.substringBefore("#").trimEnd('/').lowercase(Locale.ROOT)
             if (key.startsWith("https://") && !unique.containsKey(key)) unique[key] = hit
         }
-        val hits = unique.values.take(30)
+        val nameTokens = cleanName.lowercase(Locale.ROOT).split(Regex("""\s+""")).filter { it.length > 1 }.toSet()
+        fun relevance(hit: SearchHit): Int {
+            val text = (hit.title + " " + hit.snippet).lowercase(Locale.ROOT)
+            val matched = nameTokens.count { text.contains(it) }
+            val exact = if (text.contains(cleanName.lowercase(Locale.ROOT))) 5 else 0
+            val source = when {
+                hit.category.startsWith("Crossref") -> 4
+                hit.category.startsWith("OpenAlex") -> 4
+                hit.category.startsWith("Wikidata") -> 3
+                hit.category.startsWith("Википедия") -> 2
+                hit.category.startsWith("GDELT") -> 2
+                else -> 1
+            }
+            return matched * 3 + exact + source
+        }
+        val hits = unique.values.sortedWith(
+            compareByDescending<SearchHit> { relevance(it) }
+                .thenBy { it.category }
+                .thenBy { it.title.lowercase(Locale.ROOT) }
+        ).take(30)
+        val sourceCounts = hits.groupingBy { it.category }.eachCount()
         val domains = hits.groupingBy {
             runCatching { URL(it.url).host.lowercase(Locale.ROOT).removePrefix("www.") }.getOrDefault("unknown")
         }.eachCount()
@@ -165,7 +185,11 @@ object AnalysisEngine {
             }
         }
         findings += Finding("Покрытие поиска", queries.size.toString() + " поисковых сценария",
-            "DuckDuckGo, Wikipedia RU/EN, Wikidata RU/EN и GDELT News; результаты объединяются и дедуплицируются.")
+            "DuckDuckGo, Wikipedia RU/EN, Wikidata RU/EN, GDELT News, OpenAlex Authors и Crossref Publications; результаты ранжируются по совпадению имени и типу источника, затем дедуплицируются.")
+        findings += Finding("Источники данных", sourceCounts.size.toString() + " типов источников",
+            sourceCounts.entries.sortedByDescending { it.value }
+                .joinToString("\n") { it.key + ": " + it.value + " результатов" }
+                .ifBlank { "Источники не вернули результатов." })
         findings += Finding("Разнообразие источников", domains.size.toString() + " доменов",
             domains.entries.sortedByDescending { it.value }.take(15)
                 .joinToString("\n") { it.key + ": " + it.value + " стр." }
@@ -175,7 +199,7 @@ object AnalysisEngine {
         AnalysisResult(cleanName, "Публичные упоминания",
             "Найдено страниц: " + hits.size + "; доменов: " + domains.size + "; сценариев поиска: " + queries.size,
             findings,
-            "Поиск выполняется по открытой веб-выдаче DuckDuckGo, Wikipedia RU/EN, Wikidata RU/EN и новостному индексу GDELT. Результаты дедуплицируются по URL и группируются по доменам. Это список публичных публикаций и упоминаний, а не установление личности. Однофамильцы и разные люди с одинаковым именем могут присутствовать одновременно. Уровень достоверности не повышается только из-за количества ссылок: важно проверить независимость источников и контекст каждой публикации. Запрос имени передаётся поисковой системе. Модуль не ищет домашние адреса, частные контакты, родственников, скрытые аккаунты или местоположение человека.")
+            "Поиск выполняется по открытой веб-выдаче DuckDuckGo, Wikipedia RU/EN, Wikidata RU/EN, GDELT News, OpenAlex и Crossref. Результаты дедуплицируются по URL и группируются по доменам. Это список публичных публикаций и упоминаний, а не установление личности. Однофамильцы и разные люди с одинаковым именем могут присутствовать одновременно. Уровень достоверности не повышается только из-за количества ссылок: важно проверить независимость источников и контекст каждой публикации. Запрос имени передаётся поисковой системе. Модуль не ищет домашние адреса, частные контакты, родственников, скрытые аккаунты или местоположение человека.")
     }
 
     private fun openAlexAuthors(name: String): List<SearchHit> {
