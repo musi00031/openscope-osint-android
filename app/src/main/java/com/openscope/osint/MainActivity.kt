@@ -77,8 +77,10 @@ fun OpenScopeApp() {
         listOf(
             OsintModule("username", "Username OSINT", "Проверка публичных профилей на популярных площадках", "Идентификаторы", "Работает"),
             OsintModule("email", "Email OSINT", "Синтаксис адреса и DNS/MX домена почты", "Идентификаторы", "Работает"),
-            OsintModule("domain", "Domain OSINT", "DNS A/AAAA/MX/NS и регистрационные RDAP-данные", "Инфраструктура", "Работает"),
-            OsintModule("image", "Image & Metadata", "EXIF выбранных фотографий — следующий этап", "Медиа", "В разработке"),
+            OsintModule("domain", "Domain OSINT", "DNS A/AAAA/MX/NS/TXT/CAA и RDAP", "Инфраструктура", "Работает"),
+            OsintModule("ip", "IP OSINT", "Публичная геолокация, ASN и провайдер", "Инфраструктура", "Работает"),
+            OsintModule("url", "URL Analysis", "Разбор URL и HTTP-доступность", "Инфраструктура", "Работает"),
+            OsintModule("image", "Image & Metadata", "Локальный EXIF, GPS и SHA-256", "Медиа", "Работает"),
             OsintModule("report", "Отчёты", "Просмотр результатов текущего сеанса", "Аналитика", "Базовый")
         )
     }
@@ -172,9 +174,13 @@ fun HomeScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilterChip(selected == "username", { onSelected("username") }, label = { Text("Никнейм") })
                         FilterChip(selected == "email", { onSelected("email") }, label = { Text("Email") })
-                        FilterChip(selected == "domain", { onSelected("domain") }, label = { Text("Домен") })\n                        FilterChip(selected == "ip", { onSelected("ip") }, label = { Text("IP") })\n                        FilterChip(selected == "url", { onSelected("url") }, label = { Text("URL") })
+                        FilterChip(selected == "domain", { onSelected("domain") }, label = { Text("Домен") })
+                        FilterChip(selected == "ip", { onSelected("ip") }, label = { Text("IP") })
+                        FilterChip(selected == "url", { onSelected("url") }, label = { Text("URL") })
+                        FilterChip(selected == "image", { onSelected("image") }, label = { Text("Фото") })
                     }
-                    if (selected == "image") OutlinedButton(onClick = onPickImage, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Image, null); Spacer(Modifier.width(8.dp)); Text("Выбрать изображение") }\n                    Button(onClick = onRun, enabled = !loading && selected != "image", modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
+                    if (selected == "image") OutlinedButton(onClick = onPickImage, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Image, null); Spacer(Modifier.width(8.dp)); Text("Выбрать изображение") }
+                    Button(onClick = onRun, enabled = !loading && selected != "image", modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
                         if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
                         else Icon(Icons.Default.Search, null)
                         Spacer(Modifier.width(8.dp))
@@ -215,7 +221,8 @@ fun HomeScreen(
                             Spacer(Modifier.weight(1f))
                             Text("LOCAL", color = Muted, fontSize = 10.sp)
                         }
-                        Text(result.explanation, color = Silver, fontSize = 13.sp)\n                        OutlinedButton(onClick = { onShare(result) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Share, null); Spacer(Modifier.width(8.dp)); Text("Экспортировать отчёт") }
+                        Text(result.explanation, color = Silver, fontSize = 13.sp)
+                        OutlinedButton(onClick = { onShare(result) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Share, null); Spacer(Modifier.width(8.dp)); Text("Экспортировать отчёт") }
                         Text("Это встроенный локальный аналитический помощник на правилах, не генеративная нейросеть. Он работает без отправки ваших данных в ИИ-сервис.", color = Muted, fontSize = 10.sp)
                     }
                 }
@@ -246,6 +253,8 @@ fun ModuleCard(module: OsintModule) {
                     "email" -> Icons.Default.MarkEmailRead
                     "domain" -> Icons.Default.Language
                     "image" -> Icons.Default.Image
+                    "ip" -> Icons.Default.Router
+                    "url" -> Icons.Default.Link
                     else -> Icons.Default.Description
                 }, null, tint = Accent)
             }
