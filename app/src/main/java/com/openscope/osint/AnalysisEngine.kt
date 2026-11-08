@@ -120,9 +120,13 @@ object AnalysisEngine {
             "Научные материалы" to "\"$cleanName\" (ORCID OR исследование OR университет OR журнал)",
             "Новости и интервью" to "\"$cleanName\" (новости OR интервью OR пресс-релиз)"
         )
-        val pages = queries.map { pair ->
+        val webPages = queries.map { pair ->
             async(Dispatchers.IO) { searchPublicPages(pair.first, pair.second) }
         }.awaitAll().flatten()
+        val encyclopediaPages = listOf("ru", "en").map { language ->
+            async(Dispatchers.IO) { wikipediaPages(cleanName, language) }
+        }.awaitAll().flatten()
+        val pages = webPages + encyclopediaPages
         val unique = linkedMapOf<String, SearchHit>()
         pages.forEach { hit ->
             val key = hit.url.substringBefore("#").trimEnd('/').lowercase(Locale.ROOT)
@@ -164,6 +168,20 @@ object AnalysisEngine {
             "Поиск выполняется по открытой веб-выдаче DuckDuckGo. Результаты дедуплицируются по URL и группируются по доменам. Это список публичных публикаций и упоминаний, а не установление личности. Однофамильцы и разные люди с одинаковым именем могут присутствовать одновременно. Уровень достоверности не повышается только из-за количества ссылок: важно проверить независимость источников и контекст каждой публикации. Запрос имени передаётся поисковой системе. Модуль не ищет домашние адреса, частные контакты, родственников, скрытые аккаунты или местоположение человека.")
     }
 
+    private fun wikipediaPages(name: String, language: String): List<SearchHit> {
+        val query = "https://" + language + ".wikipedia.org/w/api.php?action=query&list=search&srsearch=" +
+            URLEncoder.encode(name, "UTF-8") + "&format=json&utf8=1&srlimit=8"
+        val json = getJson(query) ?: return emptyList()
+        val rows = json.optJSONObject("query")?.optJSONArray("search") ?: return emptyList()
+        return (0 until rows.length()).mapNotNull { index ->
+            val item = rows.optJSONObject(index) ?: return@mapNotNull null
+            val title = item.optString("title").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val excerpt = stripHtml(item.optString("snippet"))
+            val slug = URLEncoder.encode(title.replace(' ', '_'), "UTF-8")
+            SearchHit(title, "https://" + language + ".wikipedia.org/wiki/" + slug, excerpt,
+                if (language == "ru") "Википедия RU" else "Википедия EN")
+        }
+    }
     private suspend fun searchPublicPages(category: String, query: String): List<SearchHit> {
         val address = "https://html.duckduckgo.com/html/?q=" + URLEncoder.encode(query, "UTF-8")
         val html = getText(address) ?: return emptyList()
