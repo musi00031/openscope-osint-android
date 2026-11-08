@@ -38,7 +38,7 @@ object AnalysisEngine {
     }
 
     private suspend fun username(name: String, context: Context): AnalysisResult = coroutineScope {
-        require(name.length in 3..80 && name.matches(Regex("[\p{L}][\p{L} .’'\-]{1,78}[\p{L}]"))) {
+        require(name.length in 3..80 && name.matches(Regex("[\\p{L}][\\p{L} .’'\\-]{1,78}[\\p{L}]"))) {
         val root = JSONObject(context.assets.open("wmn-data.json").bufferedReader().use { it.readText() })
         val allSites = root.getJSONArray("sites")
         val eligible = (0 until allSites.length()).mapNotNull { allSites.optJSONObject(it) }
@@ -114,7 +114,7 @@ object AnalysisEngine {
         // Search only public, non-sensitive mentions. Do not query addresses, private contacts,
         // relatives, whereabouts, or data-broker sources.
         val searches = listOf(
-            "exact" to "\\"$name\\"",
+            "exact" to "\"$name\"",
             "professional" to "\\"$name\\" (профессиональный профиль OR публикация OR конференция)",
             "publications" to "\\"$name\\" (автор OR исследование OR статья OR ORCID)",
             "news" to "\\"$name\\" (новости OR интервью OR событие)"
@@ -138,14 +138,14 @@ object AnalysisEngine {
             hits.forEachIndexed { index, hit ->
                 val details = buildString {
                     append(hit.url)
-                    if (hit.snippet.isNotBlank()) append("\\n").append(hit.snippet)
+                    if (hit.snippet.isNotBlank()) append("\n").append(hit.snippet)
                     append("\\nТип запроса: ").append(hit.queryLabel)
                 }
                 findings += Finding("Открытая публикация " + (index + 1), hit.title, details, "info")
             }
         }
         findings += Finding("Источники", byDomain.size.toString() + " доменов",
-            byDomain.entries.sortedByDescending { it.value }.take(12).joinToString("\\n") { "${it.key}: ${it.value}" }.ifBlank { "Домены не определены." })
+            byDomain.entries.sortedByDescending { it.value }.take(12).joinToString("\n") { "${it.key}: ${it.value}" }.ifBlank { "Домены не определены." })
         findings += Finding("Методика", searches.size.toString() + " варианта публичного поиска",
             "Точное имя, профессиональные публичные страницы, публикации и новостные упоминания. Результаты дедуплицированы по URL.")
         AnalysisResult(name, "Поиск публичных упоминаний",
