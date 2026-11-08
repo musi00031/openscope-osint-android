@@ -79,8 +79,8 @@ fun OpenScopeApp() {
     val modules = remember {
         listOf(
             OsintModule("username", "Username OSINT", "До 400 площадок WhatsMyName + публичные совпадения", "Идентификаторы", "Работает"),
-            OsintModule("social", "Social Media OSINT", "Telegram, Instagram, TikTok, Facebook, VK, YouTube, X, Reddit, GitHub", "Социальные сети", "Работает"),
-            OsintModule("ukraine", "Ukraine Public Records", "Opendatabot, YouControl, Clarity, Prozorro, Spending, data.gov.ua, SMIDA", "Украина", "Работает"),
+            OsintModule("social", "Social Media OSINT", "14 сетей: Telegram, Instagram, TikTok, Threads, LinkedIn, VK, YouTube, X и другие", "Социальные сети", "Работает"),
+            OsintModule("ukraine", "Ukraine Public Records", "14 источников: реестры, Prozorro, судебные решения, Dozorro, АМКУ, НБУ, DREAM", "Украина", "Работает"),
             OsintModule("person", "Публичные упоминания", "DuckDuckGo, Wikipedia, Wikidata, GDELT, OpenAlex и Crossref", "Идентификаторы", "Работает"),
             OsintModule("email", "Email OSINT", "Формат, MX, SPF и DMARC домена почты", "Идентификаторы", "Работает"),
             OsintModule("domain", "Domain OSINT", "DNS, RDAP и Certificate Transparency", "Инфраструктура", "Работает"),
@@ -202,7 +202,7 @@ fun HomeScreen(
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Новое исследование", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     Text("Пассивный анализ публичных источников. Результаты обрабатываются на устройстве; для запросов к открытым источникам нужен интернет.", color = Muted, fontSize = 12.sp)
-                    OutlinedTextField(value = query, onValueChange = onQuery, modifier = Modifier.fillMaxWidth(), label = { Text("Объект исследования") }, singleLine = true)
+                    OutlinedTextField(value = query, onValueChange = onQuery, modifier = Modifier.fillMaxWidth(), label = { Text(when (selected) { "social" -> "Публичный никнейм без @"; "ukraine" -> "Название компании или код ЕГРПОУ"; "person" -> "Имя и фамилия"; else -> "Объект исследования" }) }, singleLine = true)
                     Text("Тип исследования", color = Muted, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilterChip(selected == "username", { onSelected("username") }, label = { Text("Никнейм") })
@@ -221,8 +221,8 @@ fun HomeScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilterChip(selected == "image", { onSelected("image") }, label = { Text("Фото / EXIF") })
                     }
-                    if (selected == "social") Text("Вводи публичный никнейм без @. Поиск выполняется по открытой индексируемой выдаче; закрытые профили не проверяются.", color = Muted, fontSize = 11.sp)
-                    if (selected == "ukraine") Text("Вводи название компании, организации или код ЕГРПОУ. Модуль работает с публичными данными юридических лиц.", color = Muted, fontSize = 11.sp)
+                    if (selected == "social") Text("14 платформ. Кандидат профиля отделяется от простого упоминания; закрытые профили, чаты и подписчики не проверяются.", color = Muted, fontSize = 11.sp)
+                    if (selected == "ukraine") Text("14 открытых источников для юридических лиц: реестры, закупки, судебные решения и госданные. Нужны название организации или ЕГРПОУ.", color = Muted, fontSize = 11.sp)
                     if (selected == "image") OutlinedButton(onClick = onPickImage, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Image, null); Spacer(Modifier.width(8.dp)); Text("Выбрать изображение") }
                     Button(onClick = onRun, enabled = !loading && selected != "image", modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
                         if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
