@@ -115,7 +115,11 @@ object AnalysisEngine {
         if (html != null) {
             val pattern = Regex("""<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL)
             pattern.findAll(html).take(8).forEach { match ->
-                val href = decodeHtml(match.groupValues[1])
+                var href = decodeHtml(match.groupValues[1])
+                if (href.startsWith("//")) href = "https:" + href
+                if (href.contains("uddg=")) href = runCatching {
+                    URLDecoder.decode(href.substringAfter("uddg=").substringBefore("&"), "UTF-8")
+                }.getOrDefault(href)
                 val title = stripHtml(match.groupValues[2])
                 if (href.startsWith("http") && title.isNotBlank() && !href.contains("duckduckgo.com")) links += title to href
             }
