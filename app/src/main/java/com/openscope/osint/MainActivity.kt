@@ -78,7 +78,7 @@ fun OpenScopeApp() {
     }
     val modules = remember {
         listOf(
-            OsintModule("username", "Username OSINT", "Проверка 17 публичных профилей и площадок", "Идентификаторы", "Работает"),
+            OsintModule("username", "Username OSINT", "До 400 публичных площадок по базе WhatsMyName", "Идентификаторы", "Работает"),
             OsintModule("person", "Поиск человека", "Поиск публичных упоминаний по имени и фамилии", "Идентификаторы", "Работает"),
             OsintModule("email", "Email OSINT", "Синтаксис адреса и DNS/MX домена почты", "Идентификаторы", "Работает"),
             OsintModule("domain", "Domain OSINT", "DNS A/AAAA/MX/NS/TXT/CAA и RDAP", "Инфраструктура", "Работает"),
@@ -106,7 +106,7 @@ fun OpenScopeApp() {
                             }, contentDescription = null)
                         },
                         label = { Text(item) },
-                        colors = NavigationBarItemDefaults.colors(selectedIconColor = Accent, indicatorColor = Color(0xFF382326), selectedTextColor = Silver, unselectedTextColor = Muted)
+                        colors = NavigationBarItemDefaults.colors(selectedIconColor = Accent, indicatorColor = Color(0xFF343B44), selectedTextColor = Silver, unselectedTextColor = Muted)
                     )
                 }
             }
@@ -248,7 +248,7 @@ fun HomeScreen(
                 }
             }
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF252126)), shape = RoundedCornerShape(16.dp)) {
+                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF151A20)), shape = RoundedCornerShape(16.dp)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.AutoAwesome, null, tint = Accent)
@@ -283,7 +283,7 @@ fun ModulesScreen(padding: PaddingValues, modules: List<OsintModule>) {
 fun ModuleCard(module: OsintModule) {
     Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(14.dp)) {
         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(42.dp).background(Color(0xFF302226), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(42.dp).background(Color(0xFF252B33), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
                 Icon(when(module.id) {
                     "username" -> Icons.Default.AlternateEmail
                     "person" -> Icons.Default.Person
