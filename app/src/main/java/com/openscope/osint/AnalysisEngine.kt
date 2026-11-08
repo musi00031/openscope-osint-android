@@ -270,7 +270,24 @@ object AnalysisEngine {
             }.joinToString("\n") else ""
             findings += Finding("RDAP", "Регистрационные данные получены", listOf(registrar, eventText).filter { it.isNotBlank() }.joinToString("\n").ifBlank { "Ответ RDAP получен." }, "good")
         } else findings += Finding("RDAP", "Нет данных", "Регистратор не вернул доступный RDAP-ответ.", "warn")
-        return AnalysisResult(host, "Domain OSINT", "Собраны публичные DNS- и RDAP-сведения по $host", findings,
+        val certQuery = "https://crt.sh/?q=%25." + URLEncoder.encode(host, "UTF-8") + "&output=json"
+        val certificates = getJsonArray(certQuery)
+        if (certificates != null) {
+            val names = linkedSetOf<String>()
+            for (i in 0 until certificates.length()) {
+                val row = certificates.optJSONObject(i) ?: continue
+                val rawNames = row.optString("name_value")
+                rawNames.split("\\n", "\\r").forEach { candidate ->
+                    val normalized = candidate.trim().removePrefix("*.").lowercase(Locale.ROOT)
+                    if (normalized == host || normalized.endsWith("." + host)) names += normalized
+                }
+            }
+            findings += Finding("Certificate Transparency", names.size.toString() + " публичных имён",
+                names.take(50).joinToString("\\n").ifBlank { "В доступном ответе не обнаружены имена поддоменов." },
+                if (names.isEmpty()) "info" else "good")
+        } else findings += Finding("Certificate Transparency", "Нет ответа",
+            "Журнал crt.sh недоступен или не вернул JSON. Это не означает отсутствие сертификатов.", "warn")
+        return AnalysisResult(host, "Domain OSINT", "Собраны DNS, RDAP и Certificate Transparency сведения по $host", findings,
             "DNS показывает текущую публичную конфигурацию домена, а RDAP — доступные регистрационные сведения. Отсутствие ответа не означает, что домен не существует: возможны ограничения DNS, приватность регистратора или временная недоступность источника.")
     }
 
@@ -289,6 +306,18 @@ object AnalysisEngine {
             connection.setRequestProperty("Accept", accept)
             if (connection.responseCode !in 200..299) return null
             JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+        } catch (_: Exception) { null } finally { connection.disconnect() }
+    }
+
+    private fun getJsonArray(address: String): org.json.JSONArray? {
+        val connection = runCatching { URL(address).openConnection() as HttpURLConnection }.getOrNull() ?: return null
+        return try {
+            connection.connectTimeout = 9000
+            connection.readTimeout = 12000
+            connection.setRequestProperty("User-Agent", "OpenScope-OSINT-Android/1.0")
+            connection.setRequestProperty("Accept", "application/json")
+            if (connection.responseCode !in 200..299) return null
+            org.json.JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
         } catch (_: Exception) { null } finally { connection.disconnect() }
     }
 
