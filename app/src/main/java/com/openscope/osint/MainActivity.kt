@@ -58,6 +58,15 @@ fun OpenScopeApp() {
     val prefs = remember { context.getSharedPreferences("openscope_local", android.content.Context.MODE_PRIVATE) }
     var history by remember { mutableStateOf(prefs.getString("history", "")?.split("\n")?.filter { it.isNotBlank() } ?: emptyList()) }
     val scope = rememberCoroutineScope()
+    val investigationStore = remember { InvestigationStore(context) }
+    var investigations by remember { mutableStateOf(investigationStore.list()) }
+    val saveAnalysis: (AnalysisResult) -> Unit = { analysis ->
+        investigationStore.save(analysis)
+        investigations = investigationStore.list()
+        val stamp = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
+        history = listOf("$stamp • ${analysis.module} • ${analysis.subject}") + history
+        prefs.edit().putString("history", history.take(100).joinToString("\n")).apply()
+    }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
             runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
@@ -67,10 +76,8 @@ fun OpenScopeApp() {
                 try {
                     val analysis = LocalFileAnalyzer.image(context, uri)
                     result = analysis
-                    val stamp = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
-                    history = listOf("$stamp • ${analysis.module} • ${analysis.subject}") + history
-                    prefs.edit().putString("history", history.joinToString("\n")).apply()
-                    status = "Анализ изображения завершён"
+                    saveAnalysis(analysis)
+                    status = "Анализ изображения завершён и сохранён локально"
                 } catch (e: Exception) { status = e.message ?: "Не удалось прочитать файл" }
                 finally { loading = false }
             }
@@ -158,10 +165,8 @@ fun OpenScopeApp() {
                                 try {
                                     val analysis = AnalysisEngine.run(selected, input, context)
                                     result = analysis
-                                    val stamp = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
-                                    history = listOf("$stamp • ${analysis.module} • ${analysis.subject}") + history
-                                    prefs.edit().putString("history", history.joinToString("\n")).apply()
-                                    status = "Анализ завершён"
+                                    saveAnalysis(analysis)
+                                    status = "Анализ завершён и сохранён локально"
                                 } catch (e: Exception) {
                                     status = e.message ?: "Не удалось выполнить анализ"
                                 } finally { loading = false }
@@ -170,7 +175,7 @@ fun OpenScopeApp() {
                     }
                 )
                 "Модули" -> ModulesScreen(padding, modules)
-                else -> HistoryScreen(padding, history)
+                else -> HistoryScreen(padding, investigations)
             }
         }
     }
@@ -267,6 +272,7 @@ fun HomeScreen(
                         }
                         Text(result.explanation, color = Silver, fontSize = 13.sp)
                         OutlinedButton(onClick = { onShare(result) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Share, null); Spacer(Modifier.width(8.dp)); Text("Экспортировать отчёт") }
+                        Text("Результат автоматически сохранён в локальную базу расследований на устройстве.", color = Color(0xFF75C99A), fontSize = 11.sp)
                         Text("Это встроенный локальный аналитический помощник на правилах, не генеративная нейросеть. Он работает без отправки ваших данных в ИИ-сервис.", color = Muted, fontSize = 10.sp)
                     }
                 }
@@ -314,13 +320,66 @@ fun ModuleCard(module: OsintModule) {
 }
 
 @Composable
-fun HistoryScreen(padding: PaddingValues, history: List<String>) {
+fun HistoryScreen(padding: PaddingValues, investigations: List<InvestigationEntry>) {
+    var comparison by remember { mutableStateOf<String?>(null) }
+    val dateFormat = remember { SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault()) }
     Column(Modifier.fillMaxSize().padding(padding).padding(18.dp)) {
-        Text("История", fontSize = 25.sp, fontWeight = FontWeight.Bold)
+        Text("База расследований", fontSize = 25.sp, fontWeight = FontWeight.Bold)
+        Text("Локальная SQLite-база · ${investigations.size} сохранённых анализов", color = Muted, fontSize = 12.sp)
         Spacer(Modifier.height(12.dp))
-        if (history.isEmpty()) Text("Пока нет выполненных исследований.", color = Muted)
-        else LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(history) { entry -> Card(colors = CardDefaults.cardColors(containerColor = Panel)) { Text(entry, Modifier.padding(14.dp), color = Silver, fontSize = 13.sp) } }
+        if (investigations.size >= 2) {
+            OutlinedButton(onClick = {
+                val latest = investigations[0].result
+                val previous = investigations[1].result
+                val oldMap = previous.findings.associateBy { it.title }
+                val newMap = latest.findings.associateBy { it.title }
+                val lines = mutableListOf<String>()
+                lines += "НОВЫЙ АНАЛИЗ: ${latest.module} · ${latest.subject}"
+                lines += "ПРЕДЫДУЩИЙ: ${previous.module} · ${previous.subject}"
+                lines += ""
+                (newMap.keys + oldMap.keys).distinct().forEach { key ->
+                    val now = newMap[key]
+                    val before = oldMap[key]
+                    when {
+                        before == null && now != null -> lines += "+ Новое: $key — ${now.value}"
+                        now == null && before != null -> lines += "− Больше не найдено: $key — ${before.value}"
+                        before != null && now != null && (before.value != now.value || before.detail != now.detail) ->
+                            lines += "Изменилось: $key\n  Было: ${before.value}\n  Стало: ${now.value}"
+                    }
+                }
+                if (lines.size <= 4) lines += "Существенных различий по названиям и значениям находок не обнаружено."
+                comparison = lines.joinToString("\n")
+            }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.CompareArrows, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Сравнить два последних анализа")
+            }
         }
+        if (investigations.isEmpty()) {
+            Text("Пока нет сохранённых расследований. Запусти любой модуль — результат автоматически попадёт в локальную базу.", color = Muted)
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                items(investigations, key = { it.id }) { entry ->
+                    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(14.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text(entry.result.subject, color = Silver, fontWeight = FontWeight.Bold)
+                            Text(entry.result.module, color = Accent, fontSize = 11.sp)
+                            Text(dateFormat.format(Date(entry.createdAt)), color = Muted, fontSize = 10.sp)
+                            Text(entry.result.summary, color = Silver, fontSize = 12.sp)
+                            Text("Находок: ${entry.result.findings.size}", color = Muted, fontSize = 10.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (comparison != null) {
+        AlertDialog(
+            onDismissRequest = { comparison = null },
+            title = { Text("Сравнение исследований") },
+            text = { Text(comparison ?: "", color = Silver) },
+            confirmButton = { TextButton(onClick = { comparison = null }) { Text("Закрыть") } },
+            containerColor = Panel
+        )
     }
 }
