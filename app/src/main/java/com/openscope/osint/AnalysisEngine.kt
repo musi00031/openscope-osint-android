@@ -90,8 +90,21 @@ object AnalysisEngine {
         findings += found.take(80)
         findings += Finding("Покрытие", eligible.size.toString() + " публичных GET-площадок", "Использован локально упакованный набор WhatsMyName. Из полного набора исключены NSFW, POST-проверки, CAPTCHA/Cloudflare и другие защищённые сайты.", "good")
         findings += Finding("Неоднозначные ответы", uncertain.toString(), "Сайты с антибот-защитой, тайм-аутами или изменившейся разметкой не засчитываются как найденные.", if (uncertain > 0) "warn" else "info")
-        AnalysisResult(name, "Username OSINT · WhatsMyName", "Проверено площадок: " + eligible.size + "; возможных совпадений: " + found.size + "; неоднозначных ответов: " + uncertain, findings,
-            "Движок использует открытый набор правил WhatsMyName, включённый в APK при сборке. Совпадение — кандидат публичного профиля, а не доказательство владения аккаунтом или того, что профили принадлежат одному человеку. Сайты могут менять ответы; отсутствие результата ничего не доказывает. Используются только публичные HTTPS GET-проверки; POST, авторизация, CAPTCHA и NSFW-источники отключены.")
+        // A normal username investigation must include social networks too.
+        // Previously users had to discover and select a separate Social chip.
+        val socialResult = runCatching { social(name) }.getOrNull()
+        if (socialResult != null) {
+            findings += Finding("Проверка социальных сетей", socialResult.summary,
+                "Дополнительно выполнен поиск по Telegram, Instagram, TikTok, Facebook, YouTube, VK, X, Threads, LinkedIn, Pinterest, Twitch, Reddit, GitHub и Medium через два независимых публичных поисковых индекса.", "info")
+            findings += socialResult.findings
+        } else {
+            findings += Finding("Проверка социальных сетей", "Не удалось завершить",
+                "Поисковые источники временно недоступны или вернули ошибку. Это не означает, что аккаунтов нет.", "warn")
+        }
+        AnalysisResult(name, "Username OSINT · WhatsMyName + Social OSINT",
+            "Проверено площадок WhatsMyName: " + eligible.size + "; возможных совпадений: " + found.size + "; неоднозначных ответов: " + uncertain +
+                "; соцсети: " + (socialResult?.summary ?: "нет ответа"), findings,
+            "Выполнены проверки WhatsMyName и отдельный поиск публичных профилей и упоминаний в социальных сетях. Совпадение — кандидат для ручной проверки, а не доказательство владения аккаунтом или того, что разные профили принадлежат одному человеку. Сайты и поисковые индексы могут ограничивать доступ или обновлять разметку; отсутствие результата ничего не доказывает. Используются только публичные HTTPS GET-запросы; закрытые аккаунты, приватные чаты, авторизация и обход ограничений не выполняются.")
     }
 
     private fun requestBody(address: String): Pair<Int, String> {
