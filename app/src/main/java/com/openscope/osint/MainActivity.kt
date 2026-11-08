@@ -154,7 +154,7 @@ fun OpenScopeApp() {
                             status = "Анализ выполняется…"
                             scope.launch {
                                 try {
-                                    val analysis = AnalysisEngine.run(selected, input)
+                                    val analysis = AnalysisEngine.run(selected, input, context)
                                     result = analysis
                                     val stamp = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
                                     history = listOf("$stamp • ${analysis.module} • ${analysis.subject}") + history
