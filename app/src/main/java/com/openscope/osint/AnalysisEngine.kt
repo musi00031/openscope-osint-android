@@ -33,6 +33,8 @@ object AnalysisEngine {
             "username" -> username(value, context)
             "person" -> person(value)
             "email" -> email(value)
+            "ip" -> AdvancedAnalyzers.ip(value)
+            "url" -> AdvancedAnalyzers.url(value)
             else -> domain(value)
         }
     }
