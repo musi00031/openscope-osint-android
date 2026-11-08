@@ -138,12 +138,22 @@ fun OpenScopeApp() {
                             appendLine("1. СВОДКА")
                             appendLine(analysis.summary)
                             appendLine()
-                            appendLine("2. НАЙДЕННЫЕ ДАННЫЕ И ИСТОЧНИКИ")
-                            analysis.findings.forEachIndexed { index, finding ->
-                                appendLine((index + 1).toString() + ". " + finding.title)
-                                appendLine("   Результат: " + finding.value)
-                                appendLine("   Детали / источник: " + finding.detail)
-                                appendLine("   Уровень сигнала: " + finding.level)
+                            appendLine("2. СОЦИАЛЬНЫЕ СЕТИ")
+                            analysis.findings.filter { it.section == "social" }.forEachIndexed { index, finding ->
+                                appendLine((index + 1).toString() + ". " + finding.title + " — " + finding.value)
+                                appendLine("   " + finding.detail)
+                                appendLine()
+                            }
+                            appendLine("3. УПОМИНАНИЯ НИКНЕЙМА / НОВОСТИ")
+                            analysis.findings.filter { it.section == "mentions" }.forEachIndexed { index, finding ->
+                                appendLine((index + 1).toString() + ". " + finding.title + " — " + finding.value)
+                                appendLine("   " + finding.detail)
+                                appendLine()
+                            }
+                            appendLine("4. ПРОЧИЕ РЕЗУЛЬТАТЫ")
+                            analysis.findings.filter { it.section == "general" }.forEachIndexed { index, finding ->
+                                appendLine((index + 1).toString() + ". " + finding.title + " — " + finding.value)
+                                appendLine("   " + finding.detail)
                                 appendLine()
                             }
                             appendLine("3. АНАЛИТИЧЕСКОЕ ПОЯСНЕНИЕ")
@@ -274,15 +284,30 @@ fun HomeScreen(
                         Text(result.subject, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                         Text(result.summary, color = Muted, fontSize = 12.sp)
                         HorizontalDivider(color = Color(0xFF343A42))
-                        result.findings.forEach { finding ->
-                            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(finding.title, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                                    Text(finding.value, color = when(finding.level) { "good" -> Color(0xFF75C99A); "warn" -> Color(0xFFE9B76B); else -> Silver }, fontSize = 11.sp)
+                        val groupedFindings = result.findings.groupBy { it.section }
+                        listOf("social", "mentions", "general").forEach { section ->
+                            val rows = groupedFindings[section].orEmpty()
+                            if (rows.isNotEmpty()) {
+                                Text(
+                                    when (section) {
+                                        "social" -> "01 · СОЦИАЛЬНЫЕ СЕТИ"
+                                        "mentions" -> "02 · УПОМИНАНИЯ НИКА / НОВОСТИ"
+                                        else -> "03 · ПРОЧИЕ РЕЗУЛЬТАТЫ"
+                                    },
+                                    color = Color(0xFFE58B94), fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp
+                                )
+                                rows.forEach { finding ->
+                                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(finding.title, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                                            Text(finding.value, color = when(finding.level) { "good" -> Color(0xFF75C99A); "warn" -> Color(0xFFE9B76B); else -> Silver }, fontSize = 11.sp)
+                                        }
+                                        Text(finding.detail, color = Muted, fontSize = 11.sp)
+                                    }
+                                    HorizontalDivider(color = Color(0xFF292E34))
                                 }
-                                Text(finding.detail, color = Muted, fontSize = 11.sp)
                             }
-                            HorizontalDivider(color = Color(0xFF292E34))
                         }
                     }
                 }
