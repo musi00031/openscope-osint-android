@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -34,6 +35,7 @@ import java.util.Locale
 private val Bg = Color(0xFF050608)
 private val Panel = Color(0xFF111419)
 private val Accent = Color(0xFFC5CBD3)
+private val SignalRed = Color(0xFFB83B48)
 private val Silver = Color(0xFFE7EAEE)
 private val Muted = Color(0xFF89919B)
 
@@ -115,7 +117,7 @@ fun OpenScopeApp() {
                             }, contentDescription = null)
                         },
                         label = { Text(item) },
-                        colors = NavigationBarItemDefaults.colors(selectedIconColor = Accent, indicatorColor = Color(0xFF343B44), selectedTextColor = Silver, unselectedTextColor = Muted)
+                        colors = NavigationBarItemDefaults.colors(selectedIconColor = Color(0xFFE58B94), indicatorColor = Color(0xFF3A2026), selectedTextColor = Silver, unselectedTextColor = Muted)
                     )
                 }
             }
@@ -193,14 +195,38 @@ fun HomeScreen(
         label = "silverFlowOffset"
     )
     val shimmer = Brush.linearGradient(
-        colors = listOf(Color(0xFF050608), Color(0xFF171C22), Color(0xFF090B0F), Color(0xFF242A32), Color(0xFF050608)),
+        colors = listOf(Color(0xFF050608), Color(0xFF171C22), Color(0xFF180D12), Color(0xFF242A32), Color(0xFF050608)),
         start = Offset(flow * 850f, 0f), end = Offset(950f - flow * 500f, 1800f)
     )
     LazyColumn(Modifier.fillMaxSize().background(shimmer).padding(padding).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Spacer(Modifier.height(12.dp))
-            Text("OPENSCOPE", color = Silver, fontSize = 25.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-            Text("OSINT WORKSPACE  •  ANDROID", color = Muted, fontSize = 11.sp, letterSpacing = 1.4.sp)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Image(painter = painterResource(R.drawable.ic_openscope_mark), contentDescription = "OpenScope", modifier = Modifier.size(54.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("OPENSCOPE", color = Silver, fontSize = 25.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                    Text("OSINT INTELLIGENCE WORKSPACE", color = Muted, fontSize = 10.sp, letterSpacing = 1.15.sp)
+                }
+                Surface(color = Color(0xFF281318), shape = RoundedCornerShape(50)) {
+                    Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(6.dp).background(SignalRed, RoundedCornerShape(50)))
+                        Spacer(Modifier.width(6.dp))
+                        Text("LOCAL", color = Color(0xFFE58B94), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    }
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color(0xCC111419))) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.width(3.dp).height(38.dp).background(SignalRed, RoundedCornerShape(3.dp)))
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("PUBLIC SOURCE INTELLIGENCE", color = Silver, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text("Поиск • корреляция • проверка • отчёт", color = Muted, fontSize = 11.sp)
+                    }
+                    Icon(Icons.Default.Radar, contentDescription = null, tint = SignalRed, modifier = Modifier.size(27.dp))
+                }
+            }
         }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
@@ -229,7 +255,7 @@ fun HomeScreen(
                     if (selected == "social") Text("14 платформ. Кандидат профиля отделяется от простого упоминания; закрытые профили, чаты и подписчики не проверяются.", color = Muted, fontSize = 11.sp)
                     if (selected == "ukraine") Text("14 открытых источников для юридических лиц: реестры, закупки, судебные решения и госданные. Нужны название организации или ЕГРПОУ.", color = Muted, fontSize = 11.sp)
                     if (selected == "image") OutlinedButton(onClick = onPickImage, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Image, null); Spacer(Modifier.width(8.dp)); Text("Выбрать изображение") }
-                    Button(onClick = onRun, enabled = !loading && selected != "image", modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
+                    Button(onClick = onRun, enabled = !loading && selected != "image", modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = SignalRed)) {
                         if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
                         else Icon(Icons.Default.Search, null)
                         Spacer(Modifier.width(8.dp))
@@ -243,7 +269,7 @@ fun HomeScreen(
             item {
                 Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("РЕЗУЛЬТАТ АНАЛИЗА", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text("РЕЗУЛЬТАТ АНАЛИЗА", color = Color(0xFFE58B94), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                         Text(result.subject, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                         Text(result.summary, color = Muted, fontSize = 12.sp)
                         HorizontalDivider(color = Color(0xFF343A42))
