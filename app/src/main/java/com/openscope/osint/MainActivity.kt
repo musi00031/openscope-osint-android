@@ -14,6 +14,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -401,10 +404,12 @@ fun ModuleCard(module: OsintModule) {
 @Composable
 fun HistoryScreen(padding: PaddingValues, investigations: List<InvestigationEntry>) {
     var comparison by remember { mutableStateOf<String?>(null) }
+    var opened by remember { mutableStateOf<InvestigationEntry?>(null) }
     val dateFormat = remember { SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault()) }
-    Column(Modifier.fillMaxSize().padding(padding).padding(18.dp)) {
-        Text("База расследований", fontSize = 25.sp, fontWeight = FontWeight.Bold)
-        Text("Локальная SQLite-база · ${investigations.size} сохранённых анализов", color = Muted, fontSize = 12.sp)
+    Column(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Bg, Color(0xFF101B28), Bg))).padding(padding).padding(18.dp)) {
+        Text("CASE ARCHIVE / SECURE", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.8.sp)
+        Text("История расследований", fontSize = 25.sp, fontWeight = FontWeight.Black)
+        Text("Локальная SQLite-база · ${investigations.size} полных отчётов", color = Muted, fontSize = 12.sp)
         Spacer(Modifier.height(12.dp))
         if (investigations.size >= 2) {
             OutlinedButton(onClick = {
@@ -439,18 +444,59 @@ fun HistoryScreen(padding: PaddingValues, investigations: List<InvestigationEntr
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 items(investigations, key = { it.id }) { entry ->
-                    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(14.dp)) {
+                    Card(modifier = Modifier.fillMaxWidth().clickable { opened = entry }, colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1520)), shape = RoundedCornerShape(14.dp)) {
                         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            Text(entry.result.subject, color = Silver, fontWeight = FontWeight.Bold)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(entry.result.subject, Modifier.weight(1f), color = Silver, fontWeight = FontWeight.Bold)
+                                Icon(Icons.Default.ChevronRight, null, tint = Neon)
+                            }
                             Text(entry.result.module, color = Accent, fontSize = 11.sp)
                             Text(dateFormat.format(Date(entry.createdAt)), color = Muted, fontSize = 10.sp)
                             Text(entry.result.summary, color = Silver, fontSize = 12.sp)
-                            Text("Находок: ${entry.result.findings.size}", color = Muted, fontSize = 10.sp)
+                            Text("Находок: ${entry.result.findings.size}  ·  ОТКРЫТЬ ПОЛНЫЙ ОТЧЁТ", color = Neon, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
         }
+    }
+    if (opened != null) {
+        val report = opened!!.result
+        AlertDialog(
+            onDismissRequest = { opened = null },
+            title = {
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("ПОЛНЫЙ ОТЧЁТ", color = Accent, fontSize = 10.sp, letterSpacing = 1.5.sp)
+                    Text(report.subject, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text(report.module, color = Muted, fontSize = 11.sp)
+                }
+            },
+            text = {
+                Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("СВОДКА", color = Neon, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    Text(report.summary, color = Silver, fontSize = 13.sp)
+                    listOf("social" to "СОЦИАЛЬНЫЕ СЕТИ", "mentions" to "УПОМИНАНИЯ / НОВОСТИ", "general" to "ПРОЧИЕ РЕЗУЛЬТАТЫ").forEach { (key, heading) ->
+                        val rows = report.findings.filter { it.section == key }
+                        if (rows.isNotEmpty()) {
+                            HorizontalDivider(color = Color(0xFF34495A))
+                            Text(heading, color = Neon, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            rows.forEach { finding ->
+                                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Text(finding.title + " · " + finding.value, color = Silver, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    Text(finding.detail, color = Muted, fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = Color(0xFF34495A))
+                    Text("АНАЛИТИЧЕСКОЕ ПОЯСНЕНИЕ", color = Neon, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    Text(report.explanation, color = Silver, fontSize = 12.sp)
+                    Text("Дата сохранения: " + dateFormat.format(Date(opened!!.createdAt)), color = Muted, fontSize = 10.sp)
+                }
+            },
+            confirmButton = { TextButton(onClick = { opened = null }) { Text("ЗАКРЫТЬ", color = Neon) } },
+            containerColor = Color(0xFF0B121C)
+        )
     }
     if (comparison != null) {
         AlertDialog(
