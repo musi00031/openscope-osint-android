@@ -157,9 +157,18 @@ object AnalysisEngine {
                 }
             }
         }.awaitAll()
+        val directGate = Semaphore(4)
+        val directChecks = targets.map { target ->
+            async(Dispatchers.IO) {
+                directGate.withPermit { target.name to probePublicProfile(target.directUrl, target.name, handle) }
+            }
+        }.awaitAll().toMap()
         val findings = mutableListOf<Finding>()
         var profileCandidates = 0
+        var directResponded = 0
         results.forEach { (target, hits) ->
+            val direct = directChecks[target.name] ?: ("Не удалось проверить" to "Сетевая ошибка или тайм-аут.")
+            if (direct.first.startsWith("HTTP 2")) directResponded++
             val unique = hits.distinctBy { it.url.substringBefore("#").trimEnd('/').lowercase(Locale.ROOT) }
             val profileHits = mutableListOf<SearchHit>()
             val mentionHits = mutableListOf<SearchHit>()
@@ -193,8 +202,11 @@ object AnalysisEngine {
                         .filter { it.isNotBlank() }.joinToString("\n"), "info", "mentions")
             }
             if (profileHits.isEmpty() && mentionHits.isEmpty()) {
-                findings += Finding(target.name, "В индексах не найдено",
-                    "DuckDuckGo и Bing не вернули совпадающую публичную страницу. Это не проверка существования аккаунта: закрытые профили могут не индексироваться, а поисковики могут скрывать или устаревать результаты.", "info", "social")
+                findings += Finding(target.name, "В поисковых индексах не найдено",
+                    "DuckDuckGo и Bing не вернули совпадающую страницу. Прямая проверка: " + direct.first + ". " + direct.second +
+                        " Поисковая выдача и ответ сайта — разные проверки; отсутствие результата в поиске не означает отсутствие аккаунта.", "info", "social")
+            } else {
+                findings += Finding(target.name + " · прямая проверка", direct.first, direct.second, "info", "social")
             }
         }
 
@@ -228,13 +240,13 @@ object AnalysisEngine {
                     "mentions"
                 )
             }
-        findings += Finding("Сводка социальных сетей", "$profileCandidates кандидатов профиля",
-            "Проверены 14 платформ через несколько вариантов поискового запроса на каждую. Кандидат — только индексируемая публичная ссылка с подходящим путём.", "info", "social")
+        findings += Finding("Сводка социальных сетей", "$profileCandidates кандидатов профиля · $directResponded сайтов ответили HTTP 2xx",
+            "Проверены 14 платформ через поисковые индексы и отдельные прямые GET-запросы к сформированным адресам. HTTP 2xx означает, что сайт отдал страницу, но не всегда подтверждает существование профиля: некоторые платформы возвращают общую страницу входа или заглушку.", "info", "social")
         findings += Finding("Сводка упоминаний", "Новости: $newsCount · прочий интернет: $webMentionCount",
             "Отдельно выполнен общий поиск по точному нику, украинским вариантам запроса и ряду украинских СМИ. Отсутствие совпадений не доказывает отсутствие публикаций.", "info", "mentions")
-        findings += Finding("Прямые адреса профилей", "Сформированы, не проверены",
-            targets.joinToString("\n") { it.name + ": " + it.directUrl } +
-                "\nЭто адреса для ручного открытия. Само формирование ссылки не подтверждает существование профиля.", "warn", "social")
+        findings += Finding("Прямые адреса и ответы сайтов", "Проверены HTTP-запросами",
+            targets.joinToString("\n") { it.name + ": " + it.directUrl + "\n  " + (directChecks[it.name]?.first ?: "Нет ответа") + " — " + (directChecks[it.name]?.second ?: "Проверка не завершена") } +
+                "\nHTTP-ответ не равен подтверждению личности. Если платформа блокирует автоматический запрос, откройте ссылку вручную.", "info", "social")
         AnalysisResult(handle, "Social + Web Mentions OSINT",
             "Платформ: " + targets.size + "; кандидатов профиля: " + profileCandidates + "; новостных упоминаний: " + newsCount + "; прочих веб-упоминаний: " + webMentionCount,
             findings,
@@ -492,6 +504,50 @@ object AnalysisEngine {
                 if (language == "ru") "Википедия RU" else "Википедия EN")
         }
     }
+    private fun probePublicProfile(address: String, platform: String, handle: String): Pair<String, String> {
+        val connection = runCatching { URL(address).openConnection() as HttpURLConnection }.getOrNull()
+            ?: return "Нет ответа" to "Не удалось открыть соединение."
+        return try {
+            connection.connectTimeout = 7000
+            connection.readTimeout = 7000
+            connection.instanceFollowRedirects = true
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36")
+            connection.setRequestProperty("Accept", "text/html,application/xhtml+xml")
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val body = stream?.bufferedReader()?.use { it.readText().take(500_000) }.orEmpty()
+            val normalized = body.lowercase(Locale.ROOT)
+            val h = handle.lowercase(Locale.ROOT)
+            val explicitProfileMarker = when (platform) {
+                "Instagram" -> normalized.contains("\\\"username\\\":\\\"$h\\\"") ||
+                    normalized.contains("\\\"profilepage_$h\\\"") ||
+                    (normalized.contains("instagram") && normalized.contains("\\\"$h\\\"") && normalized.contains("profile"))
+                "TikTok" -> normalized.contains("\\\"uniqueid\\\":\\\"$h\\\"") ||
+                    normalized.contains("\\\"unique_id\\\":\\\"$h\\\"")
+                "Telegram" -> normalized.contains("tgme_page_username") && normalized.contains(h)
+                else -> false
+            }
+            when {
+                code in 200..299 && explicitProfileMarker ->
+                    "HTTP $code · есть маркер профиля" to "Ответ страницы содержит маркер, похожий на никнейм. Это сильный кандидат, но проверьте страницу вручную."
+                code in 200..299 ->
+                    "HTTP $code · сайт ответил" to "Страница доступна, но сайт не отдал надёжный маркер существования именно этого профиля. Возможна общая страница или экран входа."
+                code == 404 || code == 410 ->
+                    "HTTP $code · страница не найдена" to "Сайт вернул код отсутствия страницы. Некоторые платформы скрывают профили или меняют ответы, поэтому это не окончательное доказательство."
+                code == 403 || code == 429 ->
+                    "HTTP $code · доступ ограничен" to "Платформа ограничила автоматическую проверку; результат неизвестен, а не «аккаунта нет»."
+                code in 300..399 ->
+                    "HTTP $code · перенаправление" to "Сайт перенаправил запрос; профиль не подтверждён."
+                else -> "HTTP $code · не подтверждено" to "Ответ сайта не позволяет определить существование профиля."
+            }
+        } catch (e: Exception) {
+            "Нет ответа" to "Тайм-аут, блокировка соединения или сетевая ошибка. Это не означает отсутствие аккаунта."
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private suspend fun searchPublicPages(category: String, query: String): List<SearchHit> =
         searchPublicPages(category, listOf(query))
 
