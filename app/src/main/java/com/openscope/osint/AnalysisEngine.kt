@@ -209,6 +209,9 @@ object AnalysisEngine {
         return (0 until rows.length()).mapNotNull { index ->
             val item = rows.optJSONObject(index) ?: return@mapNotNull null
             val label = item.optString("display_name").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val wanted = name.lowercase(Locale.ROOT).split(Regex("""\s+""")).filter { it.length > 1 }.toSet()
+            val actual = label.lowercase(Locale.ROOT).split(Regex("""[^\p{L}]+""")).filter { it.length > 1 }.toSet()
+            if (wanted.isEmpty() || wanted.intersect(actual).size < wanted.size) return@mapNotNull null
             val id = item.optString("id")
             if (!id.startsWith("https://openalex.org/")) return@mapNotNull null
             val works = item.optInt("works_count", 0)
@@ -226,11 +229,22 @@ object AnalysisEngine {
         return (0 until rows.length()).mapNotNull { index ->
             val item = rows.optJSONObject(index) ?: return@mapNotNull null
             val title = item.optJSONArray("title")?.optString(0).orEmpty().takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val authors = item.optJSONArray("author") ?: return@mapNotNull null
+            val wanted = name.lowercase(Locale.ROOT).split(Regex("""\s+""")).filter { it.length > 1 }.toSet()
+            val matchedAuthors = (0 until authors.length()).mapNotNull { authorIndex ->
+                val author = authors.optJSONObject(authorIndex) ?: return@mapNotNull null
+                val given = author.optString("given")
+                val family = author.optString("family")
+                val full = listOf(given, family).filter { it.isNotBlank() }.joinToString(" ")
+                val tokens = full.lowercase(Locale.ROOT).split(Regex("""[^\p{L}]+""")).filter { it.length > 1 }.toSet()
+                if (wanted.isNotEmpty() && tokens.containsAll(wanted)) full else null
+            }
+            if (matchedAuthors.isEmpty()) return@mapNotNull null
             val doi = item.optString("DOI")
             if (doi.isBlank()) return@mapNotNull null
             val publication = item.optJSONArray("container-title")?.optString(0).orEmpty()
             val year = item.optJSONObject("published")?.optJSONArray("date-parts")?.optJSONArray(0)?.optInt(0)?.takeIf { it > 0 }?.toString().orEmpty()
-            SearchHit(title, "https://doi.org/" + doi, listOf(publication, year).filter { it.isNotBlank() }.joinToString(" · "), "Crossref Publications")
+            SearchHit(title, "https://doi.org/" + doi, listOf(matchedAuthors.joinToString(", "), publication, year).filter { it.isNotBlank() }.joinToString(" · "), "Crossref Publications")
         }
     }
     private fun wikidataPages(name: String, language: String): List<SearchHit> {
