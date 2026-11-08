@@ -39,6 +39,7 @@ class InvestigationStore(context: Context) : SQLiteOpenHelper(context, "openscop
                         put("value", finding.value)
                         put("detail", finding.detail)
                         put("level", finding.level)
+                        put("section", finding.section)
                     })
                 }
             })
@@ -68,7 +69,8 @@ class InvestigationStore(context: Context) : SQLiteOpenHelper(context, "openscop
                         item.optString("title"),
                         item.optString("value"),
                         item.optString("detail"),
-                        item.optString("level", "info")
+                        item.optString("level", "info"),
+                        item.optString("section", "general")
                     )
                 }
                 val subject = cursor.getString(2)
