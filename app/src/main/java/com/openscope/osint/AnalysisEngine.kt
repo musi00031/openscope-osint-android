@@ -105,32 +105,83 @@ object AnalysisEngine {
         } catch (_: Exception) { -1 to "" } finally { connection.disconnect() }
     }
 
-    private fun person(name: String): AnalysisResult {
-        require(name.length in 3..80 && name.matches(Regex("[\\p{L}][\\p{L} .’'\\-]{1,78}[\\p{L}]"))) {
+    private data class SearchHit(val title: String, val url: String, val snippet: String, val queryLabel: String)
+
+    private suspend fun person(name: String): AnalysisResult = coroutineScope {
+        require(name.length in 3..80 && name.matches(Regex("[\\\\p{L}][\\\\p{L} .’'\\\\-]{1,78}[\\\\p{L}]"))) {
             "Введите имя и фамилию (3–80 символов)."
         }
-        val query = "\"" + name.trim() + "\""
-        val address = "https://html.duckduckgo.com/html/?q=" + URLEncoder.encode(query, "UTF-8")
-        val html = getText(address)
-        val links = mutableListOf<Pair<String, String>>()
-        if (html != null) {
-            val pattern = Regex("""<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL)
-            pattern.findAll(html).take(8).forEach { match ->
-                var href = decodeHtml(match.groupValues[1])
-                if (href.startsWith("//")) href = "https:" + href
-                if (href.contains("uddg=")) href = runCatching {
-                    URLDecoder.decode(href.substringAfter("uddg=").substringBefore("&"), "UTF-8")
-                }.getOrDefault(href)
-                val title = stripHtml(match.groupValues[2])
-                if (href.startsWith("http") && title.isNotBlank() && !href.contains("duckduckgo.com")) links += title to href
+        // Search only public, non-sensitive mentions. Do not query addresses, private contacts,
+        // relatives, whereabouts, or data-broker sources.
+        val searches = listOf(
+            "exact" to "\\"$name\\"",
+            "professional" to "\\"$name\\" (профессиональный профиль OR публикация OR конференция)",
+            "publications" to "\\"$name\\" (автор OR исследование OR статья OR ORCID)",
+            "news" to "\\"$name\\" (новости OR интервью OR событие)"
+        )
+        val batches = searches.map { (label, query) ->
+            async(Dispatchers.IO) { searchPublicMentions(query, label) }
+        }.awaitAll()
+        val all = batches.flatten()
+        val unique = linkedMapOf<String, SearchHit>()
+        all.forEach { hit ->
+            val canonical = hit.url.substringBefore("#").trimEnd('/').lowercase(Locale.ROOT)
+            if (canonical.startsWith("https://") && canonical !in unique) unique[canonical] = hit
+        }
+        val hits = unique.values.take(24)
+        val byDomain = hits.groupingBy { runCatching { URL(it.url).host.removePrefix("www.") }.getOrDefault("источник") }.eachCount()
+        val findings = mutableListOf<Finding>()
+        if (hits.isEmpty()) {
+            findings += Finding("Публичные упоминания", "Результаты не получены",
+                "Поисковая система не вернула доступные страницы. Это не доказывает отсутствие информации; возможны ограничения или блокировка выдачи.", "warn")
+        } else {
+            hits.forEachIndexed { index, hit ->
+                val details = buildString {
+                    append(hit.url)
+                    if (hit.snippet.isNotBlank()) append("\\n").append(hit.snippet)
+                    append("\\nТип запроса: ").append(hit.queryLabel)
+                }
+                findings += Finding("Открытая публикация " + (index + 1), hit.title, details, "info")
             }
         }
-        val findings = mutableListOf<Finding>()
-        if (links.isEmpty()) findings += Finding("Публичный веб-поиск", "Результаты не получены", "Поисковик не вернул доступные результаты. Попробуйте уточнить написание имени или повторить позже.", "warn")
-        else links.forEachIndexed { index, item -> findings += Finding("Публичное упоминание " + (index + 1), item.first, item.second, "info") }
-        findings += Finding("Метод", "Поиск по точному имени", "Источник: DuckDuckGo HTML. Выдача может быть неполной и содержать однофамильцев.")
-        return AnalysisResult(name, "Поиск человека", "Найдено публичных веб-результатов: " + links.size + ". Это зацепки, а не установленная личность.", findings,
-            "Совпадение имени не подтверждает, что найденные страницы относятся к одному человеку. Нужны независимые совпадения из открытых источников. Модуль не ищет домашние адреса, закрытые контакты, пароли или местоположение человека. Запрос имени передаётся поисковой системе DuckDuckGo.")
+        findings += Finding("Источники", byDomain.size.toString() + " доменов",
+            byDomain.entries.sortedByDescending { it.value }.take(12).joinToString("\\n") { "${it.key}: ${it.value}" }.ifBlank { "Домены не определены." })
+        findings += Finding("Методика", searches.size.toString() + " варианта публичного поиска",
+            "Точное имя, профессиональные публичные страницы, публикации и новостные упоминания. Результаты дедуплицированы по URL.")
+        AnalysisResult(name, "Поиск публичных упоминаний",
+            "Получено страниц: ${hits.size}; независимых доменов: ${byDomain.size}; поисковых вариантов: ${searches.size}. Личность не устанавливается.",
+            findings,
+            "Поиск расширен с одного точного запроса до нескольких тематических вариантов. Результаты содержат заголовок, фрагмент, домен и исходную ссылку. Это лишь публичные веб-упоминания: однофамильцы, тёзки и страницы о разных людях могут смешиваться. Совпадение имени, фотографии или домена не доказывает, что страницы относятся к одному человеку. Для проверки используйте контекст публикации и независимые источники. Модуль намеренно не ищет домашние адреса, частные контакты, родственников, местоположение или закрытые сведения. Имя передаётся поисковой системе DuckDuckGo.")
+    }
+
+    private suspend fun searchPublicMentions(query: String, label: String): List<SearchHit> {
+        val address = "https://html.duckduckgo.com/html/?q=" + URLEncoder.encode(query, "UTF-8")
+        val html = getText(address) ?: return emptyList()
+        val resultBlocks = Regex("""(?is)<div[^>]+class=["'][^"']*result[^"']*["'][^>]*>(.*?)</div>\\s*(?=<div[^>]+class=["'][^"']*result|</div>)""")
+        val blocks = resultBlocks.findAll(html).map { it.groupValues[1] }.toList()
+        val source = if (blocks.isNotEmpty()) blocks else listOf(html)
+        val output = mutableListOf<SearchHit>()
+        val anchor = Regex("""(?is)<a\\b([^>]*class=["'][^"']*result__a[^"']*["'][^>]*)>(.*?)</a>""")
+        val href = Regex("""(?is)href=["']([^"']+)["']""")
+        val snippet = Regex("""(?is)<(?:a|div)[^>]*class=["'][^"']*result__snippet[^"']*["'][^>]*>(.*?)</(?:a|div)>""")
+        source.forEach { block ->
+            val match = anchor.find(block) ?: return@forEach
+            val rawHref = href.find(match.groupValues[1])?.groupValues?.get(1) ?: return@forEach
+            var target = decodeHtml(rawHref)
+            if (target.startsWith("//")) target = "https:$target"
+            if (target.contains("uddg=")) {
+                target = runCatching {
+                    URLDecoder.decode(target.substringAfter("uddg=").substringBefore("&"), "UTF-8")
+                }.getOrDefault(target)
+            }
+            if (!target.startsWith("https://")) return@forEach
+            val title = stripHtml(match.groupValues[2])
+            val excerpt = snippet.find(block)?.groupValues?.get(1)?.let { stripHtml(it) }.orEmpty()
+            if (title.isNotBlank() && !target.contains("duckduckgo.com")) {
+                output += SearchHit(title, target, excerpt, label)
+            }
+        }
+        return output
     }
 
     private fun getText(address: String): String? {
