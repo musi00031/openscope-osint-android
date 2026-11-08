@@ -10,7 +10,7 @@ object AdvancedAnalyzers {
     suspend fun ip(raw: String): AnalysisResult = withContext(Dispatchers.IO) {
         val address = raw.trim()
         val ipv4Syntax = address.matches(Regex("""^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$""")) &&
-            address.split(".").all { it.toIntOrNull() in 0..255 }
+            address.split(".").all { part -> part.toIntOrNull()?.let { it in 0..255 } == true }
         val ipv6Syntax = address.contains(":") && address.matches(Regex("""^[0-9a-fA-F:.]+$"""))
         require(ipv4Syntax || ipv6Syntax) { "Введите корректный IPv4 или IPv6 адрес, не доменное имя." }
         val parsed = runCatching { java.net.InetAddress.getByName(address) }.getOrNull()
