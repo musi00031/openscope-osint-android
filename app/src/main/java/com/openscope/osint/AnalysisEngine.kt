@@ -31,6 +31,8 @@ object AnalysisEngine {
         val value = raw.trim()
         when (type) {
             "username" -> username(value, context)
+            "social" -> social(value)
+            "ukraine" -> ukraineRegistry(value)
             "person" -> person(value)
             "email" -> email(value)
             "ip" -> AdvancedAnalyzers.ip(value)
@@ -108,6 +110,95 @@ object AnalysisEngine {
     }
 
     private data class SearchHit(val title: String, val url: String, val snippet: String, val category: String)
+
+    private suspend fun social(raw: String): AnalysisResult = coroutineScope {
+        val handle = raw.trim().removePrefix("@")
+        require(handle.matches(Regex("[A-Za-z0-9._]{2,30}"))) {
+            "Введите публичный никнейм: 2–30 символов, латиница, цифры, точка или подчёркивание."
+        }
+        val targets = listOf(
+            "Telegram" to "site:t.me \"$handle\"",
+            "Instagram" to "site:instagram.com \"$handle\"",
+            "TikTok" to "site:tiktok.com/@ \"$handle\"",
+            "Facebook" to "site:facebook.com \"$handle\"",
+            "YouTube" to "site:youtube.com \"$handle\"",
+            "VK" to "site:vk.com \"$handle\"",
+            "X" to "site:x.com \"$handle\" OR site:twitter.com \"$handle\"",
+            "Reddit" to "site:reddit.com/user \"$handle\"",
+            "GitHub" to "site:github.com \"$handle\""
+        )
+        val results = targets.map { (network, query) ->
+            async(Dispatchers.IO) { network to searchPublicPages("Публичный поиск · $network", query) }
+        }.awaitAll()
+        val findings = mutableListOf<Finding>()
+        results.forEach { (network, hits) ->
+            val relevant = hits.filter { hit ->
+                (hit.title + " " + hit.url + " " + hit.snippet).contains(handle, true)
+            }.distinctBy { it.url }.take(5)
+            if (relevant.isEmpty()) {
+                findings += Finding(network, "Публичное совпадение не подтверждено",
+                    "Поисковая выдача не вернула проверяемую страницу. Профиль может быть закрытым, не индексироваться или иметь другой URL.", "info")
+            } else {
+                relevant.forEach { hit ->
+                    findings += Finding(network + " · результат", hit.title,
+                        listOf(hit.url, hit.snippet, "Публичная поисковая выдача; владельца аккаунта необходимо проверить вручную.")
+                            .filter { it.isNotBlank() }.joinToString("\n"), "good")
+                }
+            }
+        }
+        val direct = listOf(
+            "Telegram" to "https://t.me/$handle",
+            "Instagram" to "https://www.instagram.com/$handle/",
+            "TikTok" to "https://www.tiktok.com/@$handle",
+            "GitHub" to "https://github.com/$handle"
+        )
+        findings += Finding("Быстрые ссылки", "Сформированы, не проверены",
+            direct.joinToString("\n") { it.first + ": " + it.second } +
+                "\nОткрытие ссылки и существование профиля не подтверждаются автоматически.", "warn")
+        val found = findings.count { it.level == "good" }
+        AnalysisResult(handle, "Social Media OSINT",
+            "Проверены \${targets.size} социальных платформ; публичных результатов: $found",
+            findings,
+            "Поиск по публично индексируемым страницам Telegram, Instagram, TikTok, Facebook, YouTube, VK, X, Reddit и GitHub. Это поиск по никнейму, а не по номеру телефона и не установление личности. Приватные профили, закрытые чаты и непубличные данные не проверяются. Прямые ссылки являются подсказками, а не подтверждёнными аккаунтами. Никнейм передаётся поисковой системе.")
+    }
+
+    private suspend fun ukraineRegistry(raw: String): AnalysisResult = coroutineScope {
+        val subject = raw.trim().replace(Regex("""\s+"""), " ")
+        require(subject.length in 3..120 && subject.matches(Regex("""[\p{L}\p{N} .’'&()_-]+"""))) {
+            "Введите название украинской компании, организации или код ЕГРПОУ (8 цифр). Не вводите личные данные физического лица."
+        }
+        val quoted = if (subject.matches(Regex("""\d{8}"""))) subject else "\"$subject\""
+        val targets = listOf(
+            "Opendatabot" to "site:opendatabot.ua $quoted",
+            "YouControl" to "site:youcontrol.com.ua $quoted",
+            "Clarity Project" to "site:clarity-project.info $quoted",
+            "Prozorro" to "site:prozorro.gov.ua $quoted",
+            "Spending.gov.ua" to "site:spending.gov.ua $quoted",
+            "data.gov.ua" to "site:data.gov.ua $quoted",
+            "SMIDA" to "site:smida.gov.ua $quoted",
+            "Минюст Украины" to "site:minjust.gov.ua $quoted"
+        )
+        val results = targets.map { (source, query) ->
+            async(Dispatchers.IO) { source to searchPublicPages("Україна · $source", query) }
+        }.awaitAll()
+        val findings = mutableListOf<Finding>()
+        results.forEach { (source, hits) ->
+            val filtered = hits.distinctBy { it.url }.take(4)
+            if (filtered.isEmpty()) findings += Finding(source, "Результатов в выдаче нет",
+                "Источник не вернул индексируемые страницы. Для официальной проверки откройте сам реестр.", "info")
+            else filtered.forEach { hit ->
+                findings += Finding(source, hit.title, listOf(hit.url, hit.snippet).filter { it.isNotBlank() }.joinToString("\n"), "good")
+            }
+        }
+        findings += Finding("Важно о достоверности", "Поисковые совпадения — не выписка из реестра",
+            "Проверяйте код ЕГРПОУ, актуальный статус, дату обновления и первичный документ на сайте источника. Агрегаторы могут показывать неполные или устаревшие сведения.", "warn")
+        val count = findings.count { it.level == "good" }
+        AnalysisResult(subject, "Ukraine Public Records OSINT",
+            "Проверено \${targets.size} украинских публичных источников; найдено индексируемых страниц: $count",
+            findings,
+            "Модуль ориентирован на юридические лица и организации Украины: Opendatabot, YouControl, Clarity Project, Prozorro, Spending.gov.ua, data.gov.ua, SMIDA и публичные страницы Минюста. Используется поисковая выдача, а не закрытые реестры. Запрос передаётся поисковой системе. Модуль не предназначен для поиска персональных данных частных лиц.")
+    }
+
 
     private suspend fun person(name: String): AnalysisResult = coroutineScope {
         val cleanName = name.trim().replace(Regex("""\s+"""), " ")
