@@ -29,6 +29,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
+      - name: Download WhatsMyName public dataset
+        run: |
+          mkdir -p app/src/main/assets
+          curl -fsSL https://raw.githubusercontent.com/WebBreacher/WhatsMyName/main/wmn-data.json -o app/src/main/assets/wmn-data.json
       - name: Build debug APK
         run: gradle :app:assembleDebug --no-daemon
       - name: Upload APK
