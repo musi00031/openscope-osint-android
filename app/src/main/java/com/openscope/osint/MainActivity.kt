@@ -78,8 +78,8 @@ fun OpenScopeApp() {
     }
     val modules = remember {
         listOf(
-            OsintModule("username", "Username OSINT", "До 400 публичных площадок по базе WhatsMyName", "Идентификаторы", "Работает"),
-            OsintModule("person", "Поиск человека", "Поиск публичных упоминаний по имени и фамилии", "Идентификаторы", "Работает"),
+            OsintModule("username", "Username OSINT", "До 400 публичных площадок по правилам WhatsMyName", "Идентификаторы", "Работает"),
+            OsintModule("person", "Поиск человека", "DuckDuckGo, Wikipedia, Wikidata и GDELT — публичные упоминания", "Идентификаторы", "Работает"),
             OsintModule("email", "Email OSINT", "Синтаксис адреса и DNS/MX домена почты", "Идентификаторы", "Работает"),
             OsintModule("domain", "Domain OSINT", "DNS A/AAAA/MX/NS/TXT/CAA и RDAP", "Инфраструктура", "Работает"),
             OsintModule("ip", "IP OSINT", "Публичная геолокация, ASN и провайдер", "Инфраструктура", "Работает"),
