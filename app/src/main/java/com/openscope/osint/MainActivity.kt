@@ -1,6 +1,11 @@
 package com.openscope.osint
 
 import android.os.Bundle
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -46,8 +51,28 @@ fun OpenScopeApp() {
     var status by remember { mutableStateOf("Готов к исследованию") }
     var loading by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<AnalysisResult?>(null) }
-    var history by remember { mutableStateOf(listOf<String>()) }
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("openscope_local", android.content.Context.MODE_PRIVATE) }
+    var history by remember { mutableStateOf(prefs.getString("history", "")?.split("\\n")?.filter { it.isNotBlank() } ?: emptyList()) }
     val scope = rememberCoroutineScope()
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            loading = true
+            status = "Локальный анализ изображения…"
+            scope.launch {
+                try {
+                    val analysis = LocalFileAnalyzer.image(context, uri)
+                    result = analysis
+                    val stamp = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
+                    history = listOf("$stamp • ${analysis.module} • ${analysis.subject}") + history
+                    prefs.edit().putString("history", history.joinToString("\\n")).apply()
+                    status = "Анализ изображения завершён"
+                } catch (e: Exception) { status = e.message ?: "Не удалось прочитать файл" }
+                finally { loading = false }
+            }
+        }
+    }
     val modules = remember {
         listOf(
             OsintModule("username", "Username OSINT", "Проверка публичных профилей на популярных площадках", "Идентификаторы", "Работает"),
@@ -84,6 +109,18 @@ fun OpenScopeApp() {
                 "Главная" -> HomeScreen(
                     padding, query, { query = it }, selected, { selected = it },
                     modules, status, loading, result,
+                    onPickImage = { imagePicker.launch(arrayOf("image/*")) },
+                    onShare = { analysis ->
+                        val report = buildString {
+                            appendLine("OpenScope OSINT — ${analysis.module}")
+                            appendLine("Объект: ${analysis.subject}")
+                            appendLine(analysis.summary)
+                            analysis.findings.forEach { appendLine("\\n${it.title}: ${it.value}\\n${it.detail}") }
+                            appendLine("\\nОбъяснение: ${analysis.explanation}")
+                        }
+                        val send = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_SUBJECT, "OpenScope OSINT — ${analysis.subject}"); putExtra(Intent.EXTRA_TEXT, report) }
+                        context.startActivity(Intent.createChooser(send, "Экспорт отчёта"))
+                    },
                     onRun = {
                         val input = query.trim()
                         if (input.isBlank()) status = "Введите объект исследования"
@@ -97,6 +134,7 @@ fun OpenScopeApp() {
                                     result = analysis
                                     val stamp = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
                                     history = listOf("$stamp • ${analysis.module} • ${analysis.subject}") + history
+                                    prefs.edit().putString("history", history.joinToString("\\n")).apply()
                                     status = "Анализ завершён"
                                 } catch (e: Exception) {
                                     status = e.message ?: "Не удалось выполнить анализ"
@@ -116,7 +154,7 @@ fun OpenScopeApp() {
 fun HomeScreen(
     padding: PaddingValues, query: String, onQuery: (String) -> Unit,
     selected: String, onSelected: (String) -> Unit, modules: List<OsintModule>,
-    status: String, loading: Boolean, result: AnalysisResult?, onRun: () -> Unit
+    status: String, loading: Boolean, result: AnalysisResult?, onPickImage: () -> Unit, onShare: (AnalysisResult) -> Unit, onRun: () -> Unit
 ) {
     LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
@@ -134,9 +172,9 @@ fun HomeScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilterChip(selected == "username", { onSelected("username") }, label = { Text("Никнейм") })
                         FilterChip(selected == "email", { onSelected("email") }, label = { Text("Email") })
-                        FilterChip(selected == "domain", { onSelected("domain") }, label = { Text("Домен") })
+                        FilterChip(selected == "domain", { onSelected("domain") }, label = { Text("Домен") })\n                        FilterChip(selected == "ip", { onSelected("ip") }, label = { Text("IP") })\n                        FilterChip(selected == "url", { onSelected("url") }, label = { Text("URL") })
                     }
-                    Button(onClick = onRun, enabled = !loading, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
+                    if (selected == "image") OutlinedButton(onClick = onPickImage, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Image, null); Spacer(Modifier.width(8.dp)); Text("Выбрать изображение") }\n                    Button(onClick = onRun, enabled = !loading && selected != "image", modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
                         if (loading) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
                         else Icon(Icons.Default.Search, null)
                         Spacer(Modifier.width(8.dp))
@@ -177,7 +215,7 @@ fun HomeScreen(
                             Spacer(Modifier.weight(1f))
                             Text("LOCAL", color = Muted, fontSize = 10.sp)
                         }
-                        Text(result.explanation, color = Silver, fontSize = 13.sp)
+                        Text(result.explanation, color = Silver, fontSize = 13.sp)\n                        OutlinedButton(onClick = { onShare(result) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Share, null); Spacer(Modifier.width(8.dp)); Text("Экспортировать отчёт") }
                         Text("Это встроенный локальный аналитический помощник на правилах, не генеративная нейросеть. Он работает без отправки ваших данных в ИИ-сервис.", color = Muted, fontSize = 10.sp)
                     }
                 }
@@ -194,7 +232,7 @@ fun ModulesScreen(padding: PaddingValues, modules: List<OsintModule>) {
     LazyColumn(Modifier.fillMaxSize().padding(padding).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("Модули", fontSize = 25.sp, fontWeight = FontWeight.Bold); Text("Реальный статус функций", color = Muted) }
         items(modules) { ModuleCard(it) }
-        item { Text("Пока подключены проверки публичных профилей, DNS и RDAP. EXIF-анализ и экспорт отчётов добавим следующим этапом.", color = Muted, fontSize = 12.sp) }
+        item { Text("Username, Email, Domain, IP, URL и локальный EXIF-анализ доступны. Используйте только законные публичные источники.", color = Muted, fontSize = 12.sp) }
     }
 }
 
