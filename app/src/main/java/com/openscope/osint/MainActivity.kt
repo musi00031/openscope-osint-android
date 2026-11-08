@@ -342,8 +342,23 @@ fun HomeScreen(
 
 @Composable
 fun ModulesScreen(padding: PaddingValues, modules: List<OsintModule>) {
-    LazyColumn(Modifier.fillMaxSize().padding(padding).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text("Модули", fontSize = 25.sp, fontWeight = FontWeight.Bold); Text("Реальный статус функций", color = Muted) }
+    LazyColumn(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Bg, Color(0xFF101C2A), Bg))).padding(padding).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            Text("ACTIVE INTELLIGENCE GRID", color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+            Text("Модули системы", fontSize = 26.sp, fontWeight = FontWeight.Black)
+            Text("Состояние аналитических движков и локальных инструментов", color = Muted, fontSize = 12.sp)
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("10" to "МОДУЛЕЙ", "14" to "СОЦСЕТЕЙ", "LOCAL" to "РЕЖИМ").forEach { metric ->
+                    Card(Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFF101B28)), shape = RoundedCornerShape(12.dp)) {
+                        Column(Modifier.padding(11.dp)) {
+                            Text(metric.first, color = Neon, fontWeight = FontWeight.Black, fontSize = 17.sp)
+                            Text(metric.second, color = Muted, fontSize = 9.sp, letterSpacing = 1.sp)
+                        }
+                    }
+                }
+            }
+        }
         items(modules) { ModuleCard(it) }
         item { Text("Username, Email, Domain, IP, URL и локальный EXIF-анализ доступны. Используйте только законные публичные источники.", color = Muted, fontSize = 12.sp) }
     }
@@ -351,9 +366,14 @@ fun ModulesScreen(padding: PaddingValues, modules: List<OsintModule>) {
 
 @Composable
 fun ModuleCard(module: OsintModule) {
-    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(14.dp)) {
+    val pulse by rememberInfiniteTransition(label = "modulePulse").animateFloat(
+        initialValue = 0.35f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), repeatMode = RepeatMode.Reverse),
+        label = "modulePulseAlpha"
+    )
+    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1520)), shape = RoundedCornerShape(14.dp)) {
         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(42.dp).background(Color(0xFF252B33), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(42.dp).background(Color(0xFF142638), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
                 Icon(when(module.id) {
                     "username" -> Icons.Default.AlternateEmail
                     "person" -> Icons.Default.Person
@@ -363,14 +383,17 @@ fun ModuleCard(module: OsintModule) {
                     "ip" -> Icons.Default.Router
                     "url" -> Icons.Default.Link
                     else -> Icons.Default.Description
-                }, null, tint = Accent)
+                }, null, tint = Neon)
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(module.title, fontWeight = FontWeight.Bold)
                 Text(module.description, color = Muted, fontSize = 11.sp)
             }
-            Text(module.state, color = if (module.state == "Работает") Color(0xFF75C99A) else Accent, fontSize = 10.sp)
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Box(Modifier.size(7.dp).background(Neon.copy(alpha = pulse), RoundedCornerShape(50)))
+                Text(if (module.state == "Работает") "ACTIVE" else "BASIC", color = if (module.state == "Работает") Neon else Accent, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+            }
         }
     }
 }
