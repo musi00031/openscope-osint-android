@@ -38,7 +38,7 @@ object AnalysisEngine {
     }
 
     private suspend fun username(name: String, context: Context): AnalysisResult = coroutineScope {
-        require(name.matches(Regex("[A-Za-z0-9._-]{2,30}"))) { "Никнейм: используйте 2–30 символов: латиница, цифры, точка, дефис или _." }
+        require(name.length in 3..80 && name.matches(Regex("[\p{L}][\p{L} .’'\-]{1,78}[\p{L}]"))) {
         val root = JSONObject(context.assets.open("wmn-data.json").bufferedReader().use { it.readText() })
         val allSites = root.getJSONArray("sites")
         val eligible = (0 until allSites.length()).mapNotNull { allSites.optJSONObject(it) }
@@ -108,7 +108,7 @@ object AnalysisEngine {
     private data class SearchHit(val title: String, val url: String, val snippet: String, val queryLabel: String)
 
     private suspend fun person(name: String): AnalysisResult = coroutineScope {
-        require(name.length in 3..80 && name.matches(Regex("[\\\\p{L}][\\\\p{L} .’'\\\\-]{1,78}[\\\\p{L}]"))) {
+        require(name.length in 3..80 && name.matches(Regex("[\p{L}][\p{L} .’'\-]{1,78}[\p{L}]"))) {
             "Введите имя и фамилию (3–80 символов)."
         }
         // Search only public, non-sensitive mentions. Do not query addresses, private contacts,
@@ -157,29 +157,25 @@ object AnalysisEngine {
     private suspend fun searchPublicMentions(query: String, label: String): List<SearchHit> {
         val address = "https://html.duckduckgo.com/html/?q=" + URLEncoder.encode(query, "UTF-8")
         val html = getText(address) ?: return emptyList()
-        val resultBlocks = Regex("""(?is)<div[^>]+class=["'][^"']*result[^"']*["'][^>]*>(.*?)</div>\\s*(?=<div[^>]+class=["'][^"']*result|</div>)""")
-        val blocks = resultBlocks.findAll(html).map { it.groupValues[1] }.toList()
-        val source = if (blocks.isNotEmpty()) blocks else listOf(html)
+
+
+
         val output = mutableListOf<SearchHit>()
-        val anchor = Regex("""(?is)<a\\b([^>]*class=["'][^"']*result__a[^"']*["'][^>]*)>(.*?)</a>""")
+        val anchor = Regex("""(?is)<a\b([^>]*class=["'][^"']*result__a[^"']*["'][^>]*)>(.*?)</a>""")
         val href = Regex("""(?is)href=["']([^"']+)["']""")
-        val snippet = Regex("""(?is)<(?:a|div)[^>]*class=["'][^"']*result__snippet[^"']*["'][^>]*>(.*?)</(?:a|div)>""")
-        source.forEach { block ->
-            val match = anchor.find(block) ?: return@forEach
+        val snippet = Regex("""(?is)class=["'][^"']*result__snippet[^"']*["'][^>]*>(.*?)</(?:a|div)>""")
+        anchor.findAll(html).forEach { match ->
             val rawHref = href.find(match.groupValues[1])?.groupValues?.get(1) ?: return@forEach
             var target = decodeHtml(rawHref)
             if (target.startsWith("//")) target = "https:$target"
-            if (target.contains("uddg=")) {
-                target = runCatching {
-                    URLDecoder.decode(target.substringAfter("uddg=").substringBefore("&"), "UTF-8")
-                }.getOrDefault(target)
-            }
+            if (target.contains("uddg=")) target = runCatching {
+                URLDecoder.decode(target.substringAfter("uddg=").substringBefore("&"), "UTF-8")
+            }.getOrDefault(target)
             if (!target.startsWith("https://")) return@forEach
             val title = stripHtml(match.groupValues[2])
-            val excerpt = snippet.find(block)?.groupValues?.get(1)?.let { stripHtml(it) }.orEmpty()
-            if (title.isNotBlank() && !target.contains("duckduckgo.com")) {
-                output += SearchHit(title, target, excerpt, label)
-            }
+            val tail = html.substring((match.range.last + 1).coerceAtMost(html.length))
+            val excerpt = snippet.find(tail.take(1800))?.groupValues?.get(1)?.let { stripHtml(it) }.orEmpty()
+            if (title.isNotBlank() && !target.contains("duckduckgo.com")) output += SearchHit(title, target, excerpt, label)
         }
         return output
     }
