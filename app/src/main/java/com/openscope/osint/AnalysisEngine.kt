@@ -277,13 +277,13 @@ object AnalysisEngine {
             for (i in 0 until certificates.length()) {
                 val row = certificates.optJSONObject(i) ?: continue
                 val rawNames = row.optString("name_value")
-                rawNames.split("\\n", "\\r").forEach { candidate ->
+                rawNames.split("\n", "\r").forEach { candidate ->
                     val normalized = candidate.trim().removePrefix("*.").lowercase(Locale.ROOT)
                     if (normalized == host || normalized.endsWith("." + host)) names += normalized
                 }
             }
             findings += Finding("Certificate Transparency", names.size.toString() + " публичных имён",
-                names.take(50).joinToString("\\n").ifBlank { "В доступном ответе не обнаружены имена поддоменов." },
+                names.take(50).joinToString("\n").ifBlank { "В доступном ответе не обнаружены имена поддоменов." },
                 if (names.isEmpty()) "info" else "good")
         } else findings += Finding("Certificate Transparency", "Нет ответа",
             "Журнал crt.sh недоступен или не вернул JSON. Это не означает отсутствие сертификатов.", "warn")
