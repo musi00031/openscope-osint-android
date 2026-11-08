@@ -20,6 +20,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.animation.core.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -28,11 +31,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val Bg = Color(0xFF101215)
-private val Panel = Color(0xFF1A1E23)
-private val Accent = Color(0xFFE04B50)
-private val Silver = Color(0xFFD5D9DE)
-private val Muted = Color(0xFF929AA4)
+private val Bg = Color(0xFF050608)
+private val Panel = Color(0xFF111419)
+private val Accent = Color(0xFFC5CBD3)
+private val Silver = Color(0xFFE7EAEE)
+private val Muted = Color(0xFF89919B)
 
 data class OsintModule(val id: String, val title: String, val description: String, val category: String, val state: String)
 
@@ -75,7 +78,8 @@ fun OpenScopeApp() {
     }
     val modules = remember {
         listOf(
-            OsintModule("username", "Username OSINT", "Проверка публичных профилей на популярных площадках", "Идентификаторы", "Работает"),
+            OsintModule("username", "Username OSINT", "Проверка 17 публичных профилей и площадок", "Идентификаторы", "Работает"),
+            OsintModule("person", "Поиск человека", "Поиск публичных упоминаний по имени и фамилии", "Идентификаторы", "Работает"),
             OsintModule("email", "Email OSINT", "Синтаксис адреса и DNS/MX домена почты", "Идентификаторы", "Работает"),
             OsintModule("domain", "Domain OSINT", "DNS A/AAAA/MX/NS/TXT/CAA и RDAP", "Инфраструктура", "Работает"),
             OsintModule("ip", "IP OSINT", "Публичная геолокация, ASN и провайдер", "Инфраструктура", "Работает"),
@@ -114,11 +118,29 @@ fun OpenScopeApp() {
                     onPickImage = { imagePicker.launch(arrayOf("image/*")) },
                     onShare = { analysis ->
                         val report = buildString {
-                            appendLine("OpenScope OSINT — ${analysis.module}")
-                            appendLine("Объект: ${analysis.subject}")
+                            appendLine("OPENSCOPE OSINT — РАСШИРЕННЫЙ ОТЧЁТ")
+                            appendLine("Дата формирования: " + SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault()).format(Date()))
+                            appendLine("Модуль: " + analysis.module)
+                            appendLine("Объект исследования: " + analysis.subject)
+                            appendLine()
+                            appendLine("1. СВОДКА")
                             appendLine(analysis.summary)
-                            analysis.findings.forEach { appendLine("\\n${it.title}: ${it.value}\\n${it.detail}") }
-                            appendLine("\\nОбъяснение: ${analysis.explanation}")
+                            appendLine()
+                            appendLine("2. НАЙДЕННЫЕ ДАННЫЕ И ИСТОЧНИКИ")
+                            analysis.findings.forEachIndexed { index, finding ->
+                                appendLine((index + 1).toString() + ". " + finding.title)
+                                appendLine("   Результат: " + finding.value)
+                                appendLine("   Детали / источник: " + finding.detail)
+                                appendLine("   Уровень сигнала: " + finding.level)
+                                appendLine()
+                            }
+                            appendLine("3. АНАЛИТИЧЕСКОЕ ПОЯСНЕНИЕ")
+                            appendLine(analysis.explanation)
+                            appendLine()
+                            appendLine("4. МЕТОДОЛОГИЯ И ОГРАНИЧЕНИЯ")
+                            appendLine("Собраны только доступные публичные ответы выбранных источников. Отсутствие результата не доказывает отсутствие сведений. Совпадения требуют независимой проверки; автоматический поиск не устанавливает личность.")
+                            appendLine("5. ПРИВАТНОСТЬ")
+                            appendLine("Внешние источники получают поисковые запросы и проверяемые идентификаторы. Не используйте результаты для преследования, доксинга или иных неправомерных действий.")
                         }
                         val send = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_SUBJECT, "OpenScope OSINT — ${analysis.subject}"); putExtra(Intent.EXTRA_TEXT, report) }
                         context.startActivity(Intent.createChooser(send, "Экспорт отчёта"))
@@ -158,7 +180,16 @@ fun HomeScreen(
     selected: String, onSelected: (String) -> Unit, modules: List<OsintModule>,
     status: String, loading: Boolean, result: AnalysisResult?, onPickImage: () -> Unit, onShare: (AnalysisResult) -> Unit, onRun: () -> Unit
 ) {
-    LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    val flow by rememberInfiniteTransition(label = "silverFlow").animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(6500, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
+        label = "silverFlowOffset"
+    )
+    val shimmer = Brush.linearGradient(
+        colors = listOf(Color(0xFF050608), Color(0xFF171C22), Color(0xFF090B0F), Color(0xFF242A32), Color(0xFF050608)),
+        start = Offset(flow * 850f, 0f), end = Offset(950f - flow * 500f, 1800f)
+    )
+    LazyColumn(Modifier.fillMaxSize().background(shimmer).padding(padding).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Spacer(Modifier.height(12.dp))
             Text("OPENSCOPE", color = Silver, fontSize = 25.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
@@ -179,7 +210,10 @@ fun HomeScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilterChip(selected == "ip", { onSelected("ip") }, label = { Text("IP") })
                         FilterChip(selected == "url", { onSelected("url") }, label = { Text("URL") })
-                        FilterChip(selected == "image", { onSelected("image") }, label = { Text("Фото") })
+                        FilterChip(selected == "person", { onSelected("person") }, label = { Text("Человек") })
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(selected == "image", { onSelected("image") }, label = { Text("Фото / EXIF") })
                     }
                     if (selected == "image") OutlinedButton(onClick = onPickImage, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Image, null); Spacer(Modifier.width(8.dp)); Text("Выбрать изображение") }
                     Button(onClick = onRun, enabled = !loading && selected != "image", modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
@@ -252,6 +286,7 @@ fun ModuleCard(module: OsintModule) {
             Box(Modifier.size(42.dp).background(Color(0xFF302226), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
                 Icon(when(module.id) {
                     "username" -> Icons.Default.AlternateEmail
+                    "person" -> Icons.Default.Person
                     "email" -> Icons.Default.MarkEmailRead
                     "domain" -> Icons.Default.Language
                     "image" -> Icons.Default.Image
