@@ -475,7 +475,7 @@ object AnalysisEngine {
         val address = "https://html.duckduckgo.com/html/?q=" + URLEncoder.encode(query, "UTF-8")
         val html = getText(address) ?: return emptyList()
         val output = mutableListOf<SearchHit>()
-        val anchor = Regex("""(?is)<a\\b([^>]*class=["'][^"']*result__a[^"']*["'][^>]*)>(.*?)</a>""")
+        val anchor = Regex("""(?is)<a\b([^>]*class=["'][^"']*result__a[^"']*["'][^>]*)>(.*?)</a>""")
         val hrefPattern = Regex("""(?is)href=["']([^"']+)["']""")
         val snippetPattern = Regex("""(?is)class=["'][^"']*result__snippet[^"']*["'][^>]*>(.*?)</(?:a|div)>""")
         anchor.findAll(html).forEach { match ->
@@ -502,9 +502,9 @@ object AnalysisEngine {
         val address = "https://www.bing.com/search?format=rss&q=" + URLEncoder.encode(query, "UTF-8")
         val xml = getText(address) ?: return emptyList()
         val output = mutableListOf<SearchHit>()
-        val itemPattern = Regex("""(?is)<item\\b[^>]*>(.*?)</item>""")
+        val itemPattern = Regex("""(?is)<item\b[^>]*>(.*?)</item>""")
         fun tag(block: String, name: String): String =
-            Regex("""(?is)<$name(?:\\s[^>]*)?>(.*?)</$name>""").find(block)?.groupValues?.get(1)
+            Regex("""(?is)<$name(?:\s[^>]*)?>(.*?)</$name>""").find(block)?.groupValues?.get(1)
                 ?.replace("<![CDATA[", "")?.replace("]]>", "")?.let { stripHtml(it) }.orEmpty()
         itemPattern.findAll(xml).forEach { match ->
             val block = match.groupValues[1]
