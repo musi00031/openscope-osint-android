@@ -447,11 +447,22 @@ object AnalysisEngine {
                 if (language == "ru") "Википедия RU" else "Википедия EN")
         }
     }
-    private suspend fun searchPublicPages(category: String, query: String): List<SearchHit> {
+    private suspend fun searchPublicPages(category: String, query: String): List<SearchHit> = coroutineScope {
+        // Do not depend on one search provider or one HTML template. Both providers
+        // are public-web indexes; a zero-result response is not proof of absence.
+        val ddg = async(Dispatchers.IO) { searchDuckDuckGo(category, query) }
+        val bing = async(Dispatchers.IO) { searchBingRss(category, query) }
+        (runCatching { ddg.await() }.getOrDefault(emptyList()) +
+            runCatching { bing.await() }.getOrDefault(emptyList()))
+            .distinctBy { it.url.substringBefore("#").trimEnd('/').lowercase(Locale.ROOT) }
+            .take(40)
+    }
+
+    private fun searchDuckDuckGo(category: String, query: String): List<SearchHit> {
         val address = "https://html.duckduckgo.com/html/?q=" + URLEncoder.encode(query, "UTF-8")
         val html = getText(address) ?: return emptyList()
         val output = mutableListOf<SearchHit>()
-        val anchor = Regex("""(?is)<a\b([^>]*class=["'][^"']*result__a[^"']*["'][^>]*)>(.*?)</a>""")
+        val anchor = Regex("""(?is)<a\\b([^>]*class=["'][^"']*result__a[^"']*["'][^>]*)>(.*?)</a>""")
         val hrefPattern = Regex("""(?is)href=["']([^"']+)["']""")
         val snippetPattern = Regex("""(?is)class=["'][^"']*result__snippet[^"']*["'][^>]*>(.*?)</(?:a|div)>""")
         anchor.findAll(html).forEach { match ->
@@ -460,16 +471,38 @@ object AnalysisEngine {
             if (target.startsWith("//")) target = "https:" + target
             if (target.contains("uddg=")) {
                 target = runCatching {
-                    URLDecoder.decode(target.substringAfter("uddg=").substringBefore("&"), "UTF-8")
+                    val encoded = target.substringAfter("uddg=").substringBefore("&")
+                    URLDecoder.decode(encoded, "UTF-8")
                 }.getOrDefault(target)
             }
-            if (!target.startsWith("https://")) return@forEach
-            if (target.contains("duckduckgo.com")) return@forEach
+            if (!target.startsWith("https://") || target.contains("duckduckgo.com")) return@forEach
             val title = stripHtml(match.groupValues[2])
             val tailStart = (match.range.last + 1).coerceAtMost(html.length)
             val tail = html.substring(tailStart, (tailStart + 2200).coerceAtMost(html.length))
             val excerpt = snippetPattern.find(tail)?.groupValues?.get(1)?.let { stripHtml(it) }.orEmpty()
-            if (title.isNotBlank()) output += SearchHit(title, target, excerpt, category)
+            if (title.isNotBlank()) output += SearchHit(title, target, excerpt, category + " · DuckDuckGo")
+        }
+        return output
+    }
+
+    private fun searchBingRss(category: String, query: String): List<SearchHit> {
+        val address = "https://www.bing.com/search?format=rss&q=" + URLEncoder.encode(query, "UTF-8")
+        val xml = getText(address) ?: return emptyList()
+        val output = mutableListOf<SearchHit>()
+        val itemPattern = Regex("""(?is)<item\\b[^>]*>(.*?)</item>""")
+        fun tag(block: String, name: String): String =
+            Regex("""(?is)<$name(?:\\s[^>]*)?>(.*?)</$name>""").find(block)?.groupValues?.get(1)
+                ?.replace("<![CDATA[", "")?.replace("]]>", "")?.let { stripHtml(it) }.orEmpty()
+        itemPattern.findAll(xml).forEach { match ->
+            val block = match.groupValues[1]
+            val title = tag(block, "title")
+            val link = tag(block, "link").trim()
+            val description = tag(block, "description")
+            if (title.isNotBlank() && link.startsWith("https://") &&
+                runCatching { URL(link).host }.getOrDefault("").isNotBlank() &&
+                !link.contains("bing.com", ignoreCase = true)) {
+                output += SearchHit(title, link, description, category + " · Bing")
+            }
         }
         return output
     }
