@@ -1,7 +1,9 @@
 package com.openscope.osint
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import android.content.Context
+import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -24,52 +26,82 @@ data class AnalysisResult(
 )
 
 object AnalysisEngine {
-    suspend fun run(type: String, raw: String): AnalysisResult = withContext(Dispatchers.IO) {
+    suspend fun run(type: String, raw: String, context: Context): AnalysisResult = withContext(Dispatchers.IO) {
         val value = raw.trim()
         when (type) {
-            "username" -> username(value)
+            "username" -> username(value, context)
             "person" -> person(value)
             "email" -> email(value)
             else -> domain(value)
         }
     }
 
-    private fun username(name: String): AnalysisResult {
+    private suspend fun username(name: String, context: Context): AnalysisResult = coroutineScope {
         require(name.matches(Regex("[A-Za-z0-9._-]{2,30}"))) { "Никнейм: используйте 2–30 символов: латиница, цифры, точка, дефис или _." }
-        val sites = listOf(
-            "GitHub" to "https://github.com/$name",
-            "Reddit" to "https://www.reddit.com/user/$name/",
-            "GitLab" to "https://gitlab.com/$name",
-            "Pinterest" to "https://www.pinterest.com/$name/",
-            "Medium" to "https://medium.com/@$name",
-            "TikTok" to "https://www.tiktok.com/@$name",
-            "Instagram" to "https://www.instagram.com/$name/",
-            "X" to "https://x.com/$name",
-            "Twitch" to "https://www.twitch.tv/$name",
-            "YouTube" to "https://www.youtube.com/@$name",
-            "Telegram" to "https://t.me/$name",
-            "Steam" to "https://steamcommunity.com/id/$name",
-            "SoundCloud" to "https://soundcloud.com/$name",
-            "DEV" to "https://dev.to/$name",
-            "Keybase" to "https://keybase.io/$name",
-            "Hacker News" to "https://news.ycombinator.com/user?id=$name",
-            "About.me" to "https://about.me/$name"
-        )
-        val findings = sites.map { (site, address) ->
-            val status = request(address)
-            when {
-                status == 200 -> Finding(site, "Профиль отвечает (HTTP 200)", address, "good")
-                status == 404 -> Finding(site, "Профиль не найден (HTTP 404)", address, "info")
-                status == 403 || status == 429 -> Finding(site, "Источник ограничил проверку (HTTP $status)", address, "warn")
-                status in 300..399 -> Finding(site, "Перенаправление (HTTP $status)", address, "warn")
-                status < 0 -> Finding(site, "Не удалось проверить", "Сетевая ошибка или тайм-аут", "warn")
-                else -> Finding(site, "Неоднозначный ответ (HTTP $status)", address, "warn")
+        val root = JSONObject(context.assets.open("wmn-data.json").bufferedReader().use { it.readText() })
+        val allSites = root.getJSONArray("sites")
+        val eligible = (0 until allSites.length()).mapNotNull { allSites.optJSONObject(it) }
+            .filter { site ->
+                site.optBoolean("valid", true) &&
+                !site.has("post_body") &&
+                site.optString("cat") != "xx NSFW xx" &&
+                site.optString("uri_check").startsWith("https://") &&
+                !site.optJSONArray("protection").let { protection ->
+                    protection != null && (0 until protection.length()).any { i ->
+                        protection.optString(i) in listOf("captcha", "cloudflare", "cloudfront", "akamai", "ddos-guard", "user-auth", "multiple")
+                    }
+                }
+            }.take(400)
+        val gate = Semaphore(6)
+        val checks = eligible.map { site ->
+            async(Dispatchers.IO) {
+                gate.withPermit {
+                    val label = site.optString("name", "Площадка")
+                    val template = site.optString("uri_check")
+                    val profile = site.optString("uri_pretty", template).replace("{account}", name)
+                    val target = template.replace("{account}", URLEncoder.encode(name, "UTF-8"))
+                    val url = runCatching { URL(target) }.getOrNull()
+                    if (url == null || url.protocol != "https") return@withPermit Finding(label, "Пропущено", "Некорректный или небезопасный URL.", "warn")
+                    val response = requestBody(target)
+                    val expectedCode = site.optInt("e_code", -2)
+                    val missingCode = site.optInt("m_code", -3)
+                    val expectedText = site.optString("e_string")
+                    val missingText = site.optString("m_string")
+                    when {
+                        response.first == expectedCode && expectedText.isNotBlank() && response.second.contains(expectedText, true) ->
+                            Finding(label, "Возможный профиль найден", profile, "good")
+                        response.first == missingCode && (missingText.isBlank() || response.second.contains(missingText, true)) ->
+                            Finding(label, "Профиль не обнаружен", profile, "info")
+                        response.first < 0 -> Finding(label, "Нет ответа", "Тайм-аут или сетевая ошибка.", "warn")
+                        response.first == 403 || response.first == 429 -> Finding(label, "Ограничение источника", "HTTP " + response.first, "warn")
+                        else -> Finding(label, "Неоднозначно", "HTTP " + response.first + "; сигнатура не совпала.", "warn")
+                    }
+                }
             }
-        }
-        val found = findings.count { it.level == "good" }
-        val uncertain = findings.count { it.level == "warn" }
-        return AnalysisResult(name, "Username OSINT", "Проверено источников: ${sites.size}; ответили: $found; неоднозначно: $uncertain", findings,
-            "Проверены только публичные страницы профилей. HTTP 200 не доказывает, что аккаунт принадлежит одному человеку: некоторые сайты показывают заглушки или требуют авторизацию. Совпадение никнейма — лишь зацепка, а не подтверждение личности.")
+        }.awaitAll()
+        val found = checks.filter { it.level == "good" }
+        val uncertain = checks.count { it.level == "warn" }
+        val findings = mutableListOf<Finding>()
+        findings += found.take(80)
+        findings += Finding("Покрытие", eligible.size.toString() + " публичных GET-площадок", "Использован локально упакованный набор WhatsMyName. Из полного набора исключены NSFW, POST-проверки, CAPTCHA/Cloudflare и другие защищённые сайты.", "good")
+        findings += Finding("Неоднозначные ответы", uncertain.toString(), "Сайты с антибот-защитой, тайм-аутами или изменившейся разметкой не засчитываются как найденные.", if (uncertain > 0) "warn" else "info")
+        AnalysisResult(name, "Username OSINT · WhatsMyName", "Проверено площадок: " + eligible.size + "; возможных совпадений: " + found.size + "; неоднозначных ответов: " + uncertain, findings,
+            "Движок использует открытый набор правил WhatsMyName, включённый в APK при сборке. Совпадение — кандидат публичного профиля, а не доказательство владения аккаунтом или того, что профили принадлежат одному человеку. Сайты могут менять ответы; отсутствие результата ничего не доказывает. Используются только публичные HTTPS GET-проверки; POST, авторизация, CAPTCHA и NSFW-источники отключены.")
+    }
+
+    private fun requestBody(address: String): Pair<Int, String> {
+        val connection = runCatching { URL(address).openConnection() as HttpURLConnection }.getOrNull() ?: return -1 to ""
+        return try {
+            connection.connectTimeout = 6500
+            connection.readTimeout = 6500
+            connection.instanceFollowRedirects = false
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("User-Agent", "OpenScope-OSINT-Android/1.0")
+            val code = connection.responseCode
+            val stream = if (code in 200..399) connection.inputStream else connection.errorStream
+            val body = stream?.bufferedReader()?.use { it.readText().take(300_000) }.orEmpty()
+            code to body
+        } catch (_: Exception) { -1 to "" } finally { connection.disconnect() }
     }
 
     private fun person(name: String): AnalysisResult {
