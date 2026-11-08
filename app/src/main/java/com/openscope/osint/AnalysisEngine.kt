@@ -128,7 +128,11 @@ object AnalysisEngine {
         val encyclopediaPages = listOf("ru", "en").map { language ->
             async(Dispatchers.IO) { wikipediaPages(cleanName, language) }
         }.awaitAll().flatten()
-        val pages = webPages + encyclopediaPages
+        val knowledgePages = listOf("ru", "en").map { language ->
+            async(Dispatchers.IO) { wikidataPages(cleanName, language) }
+        }.awaitAll().flatten()
+        val newsPages = async(Dispatchers.IO) { gdeltNews(cleanName) }.await()
+        val pages = webPages + encyclopediaPages + knowledgePages + newsPages
         val unique = linkedMapOf<String, SearchHit>()
         pages.forEach { hit ->
             val key = hit.url.substringBefore("#").trimEnd('/').lowercase(Locale.ROOT)
@@ -170,6 +174,35 @@ object AnalysisEngine {
             "Поиск выполняется по открытой веб-выдаче DuckDuckGo. Результаты дедуплицируются по URL и группируются по доменам. Это список публичных публикаций и упоминаний, а не установление личности. Однофамильцы и разные люди с одинаковым именем могут присутствовать одновременно. Уровень достоверности не повышается только из-за количества ссылок: важно проверить независимость источников и контекст каждой публикации. Запрос имени передаётся поисковой системе. Модуль не ищет домашние адреса, частные контакты, родственников, скрытые аккаунты или местоположение человека.")
     }
 
+    private fun wikidataPages(name: String, language: String): List<SearchHit> {
+        val query = "https://www.wikidata.org/w/api.php?action=wbsearchentities&search=" +
+            URLEncoder.encode(name, "UTF-8") + "&language=" + language + "&uselang=" + language + "&format=json&limit=8"
+        val json = getJson(query) ?: return emptyList()
+        val rows = json.optJSONArray("search") ?: return emptyList()
+        return (0 until rows.length()).mapNotNull { index ->
+            val item = rows.optJSONObject(index) ?: return@mapNotNull null
+            val id = item.optString("id").takeIf { it.matches(Regex("Q[0-9]+")) } ?: return@mapNotNull null
+            val label = item.optString("label").ifBlank { id }
+            val description = item.optString("description")
+            SearchHit(label, "https://www.wikidata.org/wiki/" + id, description, "Wikidata " + language.uppercase(Locale.ROOT))
+        }
+    }
+
+    private fun gdeltNews(name: String): List<SearchHit> {
+        val query = "https://api.gdeltproject.org/api/v2/doc/doc?query=" +
+            URLEncoder.encode("\"" + name + "\"", "UTF-8") + "&mode=ArtList&format=json&maxrecords=12&sort=HybridRel"
+        val json = getJson(query) ?: return emptyList()
+        val rows = json.optJSONArray("articles") ?: return emptyList()
+        return (0 until rows.length()).mapNotNull { index ->
+            val item = rows.optJSONObject(index) ?: return@mapNotNull null
+            val title = item.optString("title").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val url = item.optString("url")
+            if (!url.startsWith("https://")) return@mapNotNull null
+            val domain = item.optString("domain")
+            val date = item.optString("seendate")
+            SearchHit(title, url, listOf(domain, date).filter { it.isNotBlank() }.joinToString(" · "), "GDELT News")
+        }
+    }
     private fun wikipediaPages(name: String, language: String): List<SearchHit> {
         val query = "https://" + language + ".wikipedia.org/w/api.php?action=query&list=search&srsearch=" +
             URLEncoder.encode(name, "UTF-8") + "&format=json&utf8=1&srlimit=8"
