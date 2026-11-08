@@ -113,92 +113,149 @@ object AnalysisEngine {
 
     private suspend fun social(raw: String): AnalysisResult = coroutineScope {
         val handle = raw.trim().removePrefix("@")
-        require(handle.matches(Regex("[A-Za-z0-9._]{2,30}"))) {
-            "Введите публичный никнейм: 2–30 символов, латиница, цифры, точка или подчёркивание."
+        require(handle.matches(Regex("[A-Za-z0-9._-]{2,40}"))) {
+            "Введите публичный никнейм: 2–40 символов, латиница, цифры, точка, дефис или подчёркивание."
         }
+        data class SocialTarget(val name: String, val domains: Set<String>, val query: String, val directUrl: String)
+        val h = handle.lowercase(Locale.ROOT)
         val targets = listOf(
-            "Telegram" to "site:t.me \"$handle\"",
-            "Instagram" to "site:instagram.com \"$handle\"",
-            "TikTok" to "site:tiktok.com/@ \"$handle\"",
-            "Facebook" to "site:facebook.com \"$handle\"",
-            "YouTube" to "site:youtube.com \"$handle\"",
-            "VK" to "site:vk.com \"$handle\"",
-            "X" to "site:x.com \"$handle\" OR site:twitter.com \"$handle\"",
-            "Reddit" to "site:reddit.com/user \"$handle\"",
-            "GitHub" to "site:github.com \"$handle\""
+            SocialTarget("Telegram", setOf("t.me", "telegram.me"), "site:t.me \"$handle\" OR site:telegram.me \"$handle\"", "https://t.me/$handle"),
+            SocialTarget("Instagram", setOf("instagram.com"), "site:instagram.com \"$handle\" OR site:instagram.com/@$handle", "https://www.instagram.com/$handle/"),
+            SocialTarget("TikTok", setOf("tiktok.com"), "site:tiktok.com/@$handle OR site:tiktok.com \"$handle\"", "https://www.tiktok.com/@$handle"),
+            SocialTarget("Facebook", setOf("facebook.com"), "site:facebook.com \"$handle\"", "https://www.facebook.com/$handle"),
+            SocialTarget("YouTube", setOf("youtube.com"), "site:youtube.com/@$handle OR site:youtube.com \"$handle\"", "https://www.youtube.com/@$handle"),
+            SocialTarget("VK", setOf("vk.com"), "site:vk.com \"$handle\"", "https://vk.com/$handle"),
+            SocialTarget("X / Twitter", setOf("x.com", "twitter.com"), "site:x.com \"$handle\" OR site:twitter.com \"$handle\"", "https://x.com/$handle"),
+            SocialTarget("Threads", setOf("threads.net"), "site:threads.net/@$handle OR site:threads.net \"$handle\"", "https://www.threads.net/@$handle"),
+            SocialTarget("LinkedIn", setOf("linkedin.com"), "site:linkedin.com/in/ \"$handle\"", "https://www.linkedin.com/in/$handle/"),
+            SocialTarget("Pinterest", setOf("pinterest.com"), "site:pinterest.com \"$handle\"", "https://www.pinterest.com/$handle/"),
+            SocialTarget("Twitch", setOf("twitch.tv"), "site:twitch.tv \"$handle\"", "https://www.twitch.tv/$handle"),
+            SocialTarget("Reddit", setOf("reddit.com"), "site:reddit.com/user \"$handle\" OR site:reddit.com/u \"$handle\"", "https://www.reddit.com/user/$handle/"),
+            SocialTarget("GitHub", setOf("github.com"), "site:github.com \"$handle\"", "https://github.com/$handle"),
+            SocialTarget("Medium", setOf("medium.com"), "site:medium.com/@$handle OR site:medium.com \"$handle\"", "https://medium.com/@$handle")
         )
-        val results = targets.map { (network, query) ->
-            async(Dispatchers.IO) { network to searchPublicPages("Публичный поиск · $network", query) }
-        }.awaitAll()
-        val findings = mutableListOf<Finding>()
-        results.forEach { (network, hits) ->
-            val relevant = hits.filter { hit ->
-                (hit.title + " " + hit.url + " " + hit.snippet).contains(handle, true)
-            }.distinctBy { it.url }.take(5)
-            if (relevant.isEmpty()) {
-                findings += Finding(network, "Публичное совпадение не подтверждено",
-                    "Поисковая выдача не вернула проверяемую страницу. Профиль может быть закрытым, не индексироваться или иметь другой URL.", "info")
-            } else {
-                relevant.forEach { hit ->
-                    findings += Finding(network + " · результат", hit.title,
-                        listOf(hit.url, hit.snippet, "Публичная поисковая выдача; владельца аккаунта необходимо проверить вручную.")
-                            .filter { it.isNotBlank() }.joinToString("\n"), "good")
+        val gate = Semaphore(5)
+        val results = targets.map { target ->
+            async(Dispatchers.IO) {
+                gate.withPermit {
+                    target to searchPublicPages("Публичный поиск · \${target.name}", target.query)
                 }
             }
+        }.awaitAll()
+        val findings = mutableListOf<Finding>()
+        var profileCandidates = 0
+        var mentions = 0
+        results.forEach { (target, hits) ->
+            val unique = hits.distinctBy { it.url.substringBefore("#").trimEnd('/').lowercase(Locale.ROOT) }
+            val profileHits = mutableListOf<SearchHit>()
+            val mentionHits = mutableListOf<SearchHit>()
+            unique.forEach { hit ->
+                val parsed = runCatching { URL(hit.url) }.getOrNull()
+                val host = parsed?.host?.lowercase(Locale.ROOT)?.removePrefix("www.").orEmpty()
+                val pathParts = parsed?.path.orEmpty().split("/").filter { it.isNotBlank() }.map { it.removePrefix("@").lowercase(Locale.ROOT) }
+                val hostMatches = target.domains.any { host == it || host.endsWith(".$it") }
+                val pathMatch = when (target.name) {
+                    "Telegram" -> pathParts.firstOrNull() == h || (pathParts.firstOrNull() == "s" && pathParts.getOrNull(1) == h)
+                    "Instagram", "Threads", "Twitch", "Pinterest", "Medium", "VK", "Facebook" -> pathParts.firstOrNull() == h
+                    "TikTok", "YouTube" -> pathParts.any { it == h }
+                    "X / Twitter" -> pathParts.firstOrNull() == h
+                    "LinkedIn" -> pathParts.firstOrNull() == "in" && pathParts.getOrNull(1) == h
+                    "Reddit" -> pathParts.size >= 2 && pathParts[0] in setOf("user", "u") && pathParts[1] == h
+                    "GitHub" -> pathParts.firstOrNull() == h
+                    else -> false
+                }
+                if (hostMatches && pathMatch) profileHits += hit
+                else if ((hit.title + " " + hit.snippet).contains(handle, true)) mentionHits += hit
+            }
+            profileHits.take(5).forEach { hit ->
+                profileCandidates++
+                findings += Finding(target.name + " · кандидат профиля", hit.title,
+                    listOf(hit.url, hit.snippet, "Совпадает домен и путь публичной страницы с никнеймом. Это не подтверждает личность владельца.")
+                        .filter { it.isNotBlank() }.joinToString("\n"), "good")
+            }
+            if (profileHits.isEmpty() && mentionHits.isNotEmpty()) {
+                mentionHits.take(3).forEach { hit ->
+                    mentions++
+                    findings += Finding(target.name + " · упоминание", hit.title,
+                        listOf(hit.url, hit.snippet, "Никнейм встречается в индексируемом тексте, но URL не подтверждает профиль с таким именем.")
+                            .filter { it.isNotBlank() }.joinToString("\n"), "info")
+                }
+            }
+            if (profileHits.isEmpty() && mentionHits.isEmpty()) {
+                findings += Finding(target.name, "Публичный результат не найден",
+                    "Поисковая выдача не вернула страницу с точным путём профиля или явным упоминанием. Площадка может не индексироваться или ограничивать просмотр.", "info")
+            }
         }
-        val direct = listOf(
-            "Telegram" to "https://t.me/$handle",
-            "Instagram" to "https://www.instagram.com/$handle/",
-            "TikTok" to "https://www.tiktok.com/@$handle",
-            "GitHub" to "https://github.com/$handle"
-        )
-        findings += Finding("Быстрые ссылки", "Сформированы, не проверены",
-            direct.joinToString("\n") { it.first + ": " + it.second } +
-                "\nОткрытие ссылки и существование профиля не подтверждаются автоматически.", "warn")
-        val found = findings.count { it.level == "good" }
+        findings += Finding("Прямые адреса профилей", "Сформированы, не проверены",
+            targets.joinToString("\n") { it.name + ": " + it.directUrl } +
+                "\nЭто шаблоны адресов для ручной проверки, а не подтверждение существования аккаунтов.", "warn")
         AnalysisResult(handle, "Social Media OSINT",
-            "Проверены ${targets.size} социальных платформ; публичных результатов: $found",
+            "Проверено \${targets.size} платформ; кандидатов профиля: $profileCandidates; отдельных упоминаний: $mentions",
             findings,
-            "Поиск по публично индексируемым страницам Telegram, Instagram, TikTok, Facebook, YouTube, VK, X, Reddit и GitHub. Это поиск по никнейму, а не по номеру телефона и не установление личности. Приватные профили, закрытые чаты и непубличные данные не проверяются. Прямые ссылки являются подсказками, а не подтверждёнными аккаунтами. Никнейм передаётся поисковой системе.")
+            "Пассивный поиск публично индексируемых страниц в Telegram, Instagram, TikTok, Facebook, YouTube, VK, X, Threads, LinkedIn, Pinterest, Twitch, Reddit, GitHub и Medium. Кандидат профиля засчитывается только при совпадении домена площадки и сегмента URL с никнеймом; текстовые упоминания вынесены отдельно. Ни один результат не устанавливает личность владельца. Закрытые аккаунты, приватные чаты, скрытые подписчики и данные за авторизацией не проверяются. Никнейм отправляется поисковой системе DuckDuckGo.")
     }
 
     private suspend fun ukraineRegistry(raw: String): AnalysisResult = coroutineScope {
         val subject = raw.trim().replace(Regex("""\s+"""), " ")
         require(subject.length in 3..120 && subject.matches(Regex("""[\p{L}\p{N} .’'&()_-]+"""))) {
-            "Введите название украинской компании, организации или код ЕГРПОУ (8 цифр). Не вводите личные данные физического лица."
+            "Введите название украинской компании, организации или код ЕГРПОУ (8 цифр). Не вводите персональные данные частного лица."
         }
-        val quoted = if (subject.matches(Regex("""\d{8}"""))) subject else "\"$subject\""
+        val code = subject.matches(Regex("""\d{8}"""))
+        val quoted = if (code) subject else "\"$subject\""
+        data class RegistryTarget(val name: String, val domain: String, val query: String, val purpose: String)
         val targets = listOf(
-            "Opendatabot" to "site:opendatabot.ua $quoted",
-            "YouControl" to "site:youcontrol.com.ua $quoted",
-            "Clarity Project" to "site:clarity-project.info $quoted",
-            "Prozorro" to "site:prozorro.gov.ua $quoted",
-            "Spending.gov.ua" to "site:spending.gov.ua $quoted",
-            "data.gov.ua" to "site:data.gov.ua $quoted",
-            "SMIDA" to "site:smida.gov.ua $quoted",
-            "Минюст Украины" to "site:minjust.gov.ua $quoted"
+            RegistryTarget("Opendatabot", "opendatabot.ua", "site:opendatabot.ua $quoted", "Карточки компаний и открытые регистрационные сведения"),
+            RegistryTarget("YouControl", "youcontrol.com.ua", "site:youcontrol.com.ua $quoted", "Публичные страницы компаний и деловые связи"),
+            RegistryTarget("Clarity Project", "clarity-project.info", "site:clarity-project.info $quoted", "Аналитика закупок и участников"),
+            RegistryTarget("Prozorro", "prozorro.gov.ua", "site:prozorro.gov.ua $quoted", "Публичные закупки и тендерные объявления"),
+            RegistryTarget("Spending.gov.ua", "spending.gov.ua", "site:spending.gov.ua $quoted", "Публичные транзакции и расходы"),
+            RegistryTarget("data.gov.ua", "data.gov.ua", "site:data.gov.ua $quoted", "Открытые наборы государственных данных"),
+            RegistryTarget("SMIDA", "smida.gov.ua", "site:smida.gov.ua $quoted", "Раскрытие информации эмитентами"),
+            RegistryTarget("Минюст Украины", "minjust.gov.ua", "site:minjust.gov.ua $quoted", "Официальные публикации и сервисы Минюста"),
+            RegistryTarget("ЕГР Минюста", "usr.minjust.gov.ua", "site:usr.minjust.gov.ua $quoted", "Официальный Единый государственный реестр"),
+            RegistryTarget("Судебный реестр", "reyestr.court.gov.ua", "site:reyestr.court.gov.ua $quoted", "Публичные судебные решения; совпадение названия требует ручной проверки"),
+            RegistryTarget("Dozorro", "dozorro.org", "site:dozorro.org $quoted", "Публичный мониторинг закупок и отзывы участников"),
+            RegistryTarget("АМКУ", "amcu.gov.ua", "site:amcu.gov.ua $quoted", "Публичные решения и сообщения Антимонопольного комитета"),
+            RegistryTarget("НБУ", "bank.gov.ua", "site:bank.gov.ua $quoted", "Публичные сведения о финансовом рынке и учреждениях"),
+            RegistryTarget("DREAM", "dream.gov.ua", "site:dream.gov.ua $quoted", "Публичные проекты восстановления и инвестиций")
         )
-        val results = targets.map { (source, query) ->
-            async(Dispatchers.IO) { source to searchPublicPages("Україна · $source", query) }
+        val gate = Semaphore(4)
+        val results = targets.map { target ->
+            async(Dispatchers.IO) {
+                gate.withPermit {
+                    target to searchPublicPages("Украина · \${target.name}", target.query)
+                }
+            }
         }.awaitAll()
         val findings = mutableListOf<Finding>()
-        results.forEach { (source, hits) ->
-            val filtered = hits.distinctBy { it.url }.take(4)
-            if (filtered.isEmpty()) findings += Finding(source, "Результатов в выдаче нет",
-                "Источник не вернул индексируемые страницы. Для официальной проверки откройте сам реестр.", "info")
-            else filtered.forEach { hit ->
-                findings += Finding(source, hit.title, listOf(hit.url, hit.snippet).filter { it.isNotBlank() }.joinToString("\n"), "good")
+        var indexedPages = 0
+        results.forEach { (target, hits) ->
+            val valid = hits.filter { hit ->
+                val host = runCatching { URL(hit.url).host.lowercase(Locale.ROOT).removePrefix("www.") }.getOrDefault("")
+                host == target.domain || host.endsWith("." + target.domain)
+            }.distinctBy { it.url.substringBefore("#").trimEnd('/').lowercase(Locale.ROOT) }.take(5)
+            if (valid.isEmpty()) {
+                findings += Finding(target.name, "В поисковой выдаче нет проверяемой страницы",
+                    target.purpose + ". Поисковая система не вернула индексируемый результат; это не означает отсутствие записи в самом источнике.", "info")
+            } else {
+                valid.forEach { hit ->
+                    indexedPages++
+                    findings += Finding(target.name + " · публичная страница", hit.title,
+                        listOf(hit.url, hit.snippet, target.purpose, "Проверьте первичную запись и актуальность непосредственно на сайте источника.")
+                            .filter { it.isNotBlank() }.joinToString("\n"), "good")
+                }
             }
         }
-        findings += Finding("Важно о достоверности", "Поисковые совпадения — не выписка из реестра",
-            "Проверяйте код ЕГРПОУ, актуальный статус, дату обновления и первичный документ на сайте источника. Агрегаторы могут показывать неполные или устаревшие сведения.", "warn")
-        val count = findings.count { it.level == "good" }
+        findings += Finding("Идентификатор", if (code) "Формат ЕГРПОУ: 8 цифр" else "Поиск по названию",
+            if (code) "Поиск выполнялся по указанному коду. Сверьте его с официальной карточкой организации."
+            else "Названия могут совпадать у разных юридических лиц. Для точной идентификации используйте код ЕГРПОУ.", if (code) "good" else "warn")
+        findings += Finding("Проверка достоверности", "Поисковая выдача не является официальной выпиской",
+            "OpenScope показывает ссылки и фрагменты поисковой выдачи. Статус компании, судебное решение, закупку или транзакцию нужно подтверждать первичным документом; учитывайте дату и контекст публикации.", "warn")
         AnalysisResult(subject, "Ukraine Public Records OSINT",
-            "Проверено ${targets.size} украинских публичных источников; найдено индексируемых страниц: $count",
+            "Проверено \${targets.size} источников; получено индексируемых публичных страниц: $indexedPages",
             findings,
-            "Модуль ориентирован на юридические лица и организации Украины: Opendatabot, YouControl, Clarity Project, Prozorro, Spending.gov.ua, data.gov.ua, SMIDA и публичные страницы Минюста. Используется поисковая выдача, а не закрытые реестры. Запрос передаётся поисковой системе. Модуль не предназначен для поиска персональных данных частных лиц.")
+            "Модуль ориентирован на юридические лица и организации Украины. Источники: Opendatabot, YouControl, Clarity Project, Prozorro, Spending.gov.ua, data.gov.ua, SMIDA, Минюст/ЕГР, публичный судебный реестр, Dozorro, АМКУ, НБУ и DREAM. Используется поиск публичных страниц, а не закрытые базы и не авторизованные кабинеты. Поисковый запрос передаётся DuckDuckGo. Совпадение названия не доказывает связь с конкретным лицом.")
     }
-
 
     private suspend fun person(name: String): AnalysisResult = coroutineScope {
         val cleanName = name.trim().replace(Regex("""\s+"""), " ")
