@@ -11,6 +11,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -33,12 +36,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val Bg = Color(0xFF050608)
-private val Panel = Color(0xFF111419)
-private val Accent = Color(0xFFC5CBD3)
-private val SignalRed = Color(0xFFB83B48)
-private val Silver = Color(0xFFE7EAEE)
-private val Muted = Color(0xFF89919B)
+private val Bg = Color(0xFF03060B)
+private val Panel = Color(0xFF0C121B)
+private val Accent = Color(0xFF9BE8FF)
+private val SignalRed = Color(0xFFB83B58)
+private val Silver = Color(0xFFEAF4FA)
+private val Muted = Color(0xFF8193A5)
+private val Neon = Color(0xFF45CFFF)
 
 data class OsintModule(val id: String, val title: String, val description: String, val category: String, val state: String)
 
@@ -216,7 +220,7 @@ fun HomeScreen(
                 Image(painter = painterResource(R.drawable.ic_openscope_mark), contentDescription = "OpenScope", modifier = Modifier.size(54.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("OPENSCOPE", color = Silver, fontSize = 25.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-                    Text("OSINT INTELLIGENCE WORKSPACE", color = Muted, fontSize = 10.sp, letterSpacing = 1.15.sp)
+                    Text("NEXT-GEN INTELLIGENCE SYSTEM", color = Accent, fontSize = 10.sp, letterSpacing = 1.35.sp)
                 }
                 Surface(color = Color(0xFF281318), shape = RoundedCornerShape(50)) {
                     Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -232,10 +236,10 @@ fun HomeScreen(
                     Box(Modifier.width(3.dp).height(38.dp).background(SignalRed, RoundedCornerShape(3.dp)))
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text("PUBLIC SOURCE INTELLIGENCE", color = Silver, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                        Text("Поиск • корреляция • проверка • отчёт", color = Muted, fontSize = 11.sp)
+                        Text("NEURAL-STYLE ANALYSIS CORE", color = Silver, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text("LIVE MODULES  •  CORRELATION  •  DEEP REPORTS", color = Muted, fontSize = 10.sp)
                     }
-                    Icon(Icons.Default.Hub, contentDescription = null, tint = SignalRed, modifier = Modifier.size(27.dp))
+                    Icon(Icons.Default.Hub, contentDescription = null, tint = Neon, modifier = Modifier.size(27.dp))
                 }
             }
         }
