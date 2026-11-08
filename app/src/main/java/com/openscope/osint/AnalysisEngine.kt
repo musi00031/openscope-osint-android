@@ -55,7 +55,7 @@ object AnalysisEngine {
         }
         val found = findings.count { it.level == "good" }
         val uncertain = findings.count { it.level == "warn" }
-        AnalysisResult(name, "Username OSINT", "Проверено источников: ${sites.size}; ответили: $found; неоднозначно: $uncertain", findings,
+        return AnalysisResult(name, "Username OSINT", "Проверено источников: ${sites.size}; ответили: $found; неоднозначно: $uncertain", findings,
             "Проверены только публичные страницы профилей. HTTP 200 не доказывает, что аккаунт принадлежит одному человеку: некоторые сайты показывают заглушки или требуют авторизацию. Совпадение никнейма — лишь зацепка, а не подтверждение личности.")
     }
 
@@ -71,7 +71,7 @@ object AnalysisEngine {
         else findings += Finding("MX-записи", "Не обнаружены", "У домена не найден MX-ответ через публичный DNS-over-HTTPS.", "warn")
         val a = dns(host, "A")
         findings += Finding("DNS A", if (a.isEmpty()) "Нет ответа" else "Найдены", a.ifEmpty { listOf("A-записи не получены") }.joinToString("\n"), if (a.isEmpty()) "warn" else "info")
-        AnalysisResult(address, "Email OSINT", "Проверен формат и публичная DNS-конфигурация домена $host", findings,
+        return AnalysisResult(address, "Email OSINT", "Проверен формат и публичная DNS-конфигурация домена $host", findings,
             "Проверка не подтверждает существование почтового ящика и не отправляет письмо. MX-записи показывают, что домен настроен принимать почту; это не гарантирует доставку или существование конкретного адреса.")
     }
 
@@ -99,7 +99,7 @@ object AnalysisEngine {
             }.joinToString("\n") else ""
             findings += Finding("RDAP", "Регистрационные данные получены", listOf(registrar, eventText).filter { it.isNotBlank() }.joinToString("\n").ifBlank { "Ответ RDAP получен." }, "good")
         } else findings += Finding("RDAP", "Нет данных", "Регистратор не вернул доступный RDAP-ответ.", "warn")
-        AnalysisResult(host, "Domain OSINT", "Собраны публичные DNS- и RDAP-сведения по $host", findings,
+        return AnalysisResult(host, "Domain OSINT", "Собраны публичные DNS- и RDAP-сведения по $host", findings,
             "DNS показывает текущую публичную конфигурацию домена, а RDAP — доступные регистрационные сведения. Отсутствие ответа не означает, что домен не существует: возможны ограничения DNS, приватность регистратора или временная недоступность источника.")
     }
 
