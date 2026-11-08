@@ -246,6 +246,15 @@ object AnalysisEngine {
                 }
             }
         }
+        val openDataHits = async(Dispatchers.IO) { dataGovDatasetSearch(subject) }.await()
+        openDataHits.forEach { hit ->
+            indexedPages++
+            findings += Finding("data.gov.ua · API набора данных", hit.title,
+                listOf(hit.url, hit.snippet, "Результат получен напрямую из официального CKAN Action API портала открытых данных. Набор данных может содержать только косвенное упоминание организации.")
+                    .filter { it.isNotBlank() }.joinToString("\n"), "good")
+        }
+        findings += Finding("Прямой API data.gov.ua", if (openDataHits.isEmpty()) "Совпадений в каталоге не найдено" else "${openDataHits.size} наборов данных",
+            "Выполнен прямой запрос CKAN package_search к data.gov.ua; это поиск по каталогу наборов данных, а не по всем записям государственных реестров.", if (openDataHits.isEmpty()) "info" else "good")
         findings += Finding("Идентификатор", if (code) "Формат ЕГРПОУ: 8 цифр" else "Поиск по названию",
             if (code) "Поиск выполнялся по указанному коду. Сверьте его с официальной карточкой организации."
             else "Названия могут совпадать у разных юридических лиц. Для точной идентификации используйте код ЕГРПОУ.", if (code) "good" else "warn")
@@ -463,6 +472,31 @@ object AnalysisEngine {
             if (title.isNotBlank()) output += SearchHit(title, target, excerpt, category)
         }
         return output
+    }
+
+    private fun dataGovDatasetSearch(query: String): List<SearchHit> {
+        val address = "https://data.gov.ua/api/3/action/package_search?q=" +
+            URLEncoder.encode(query, "UTF-8") + "&rows=8"
+        val connection = runCatching { URL(address).openConnection() as HttpURLConnection }.getOrNull() ?: return emptyList()
+        return try {
+            connection.connectTimeout = 8000
+            connection.readTimeout = 10000
+            connection.setRequestProperty("User-Agent", "OpenScope-OSINT-Android/1.0")
+            connection.setRequestProperty("Accept", "application/json")
+            if (connection.responseCode !in 200..299) return emptyList()
+            val root = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+            if (!root.optBoolean("success", false)) return emptyList()
+            val rows = root.optJSONObject("result")?.optJSONArray("results") ?: return emptyList()
+            (0 until rows.length()).mapNotNull { index ->
+                val item = rows.optJSONObject(index) ?: return@mapNotNull null
+                val title = item.optString("title").ifBlank { item.optString("name") }
+                if (title.isBlank()) return@mapNotNull null
+                val url = item.optString("url").takeIf { it.startsWith("https://") }
+                    ?: "https://data.gov.ua/dataset/" + item.optString("name")
+                val notes = item.optString("notes").replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim().take(500)
+                SearchHit(title, url, notes, "data.gov.ua CKAN API")
+            }
+        } catch (_: Exception) { emptyList() } finally { connection.disconnect() }
     }
 
     private fun getText(address: String): String? {
