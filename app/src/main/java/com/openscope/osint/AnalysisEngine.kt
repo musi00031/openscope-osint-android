@@ -108,16 +108,16 @@ object AnalysisEngine {
     private data class SearchHit(val title: String, val url: String, val snippet: String, val queryLabel: String)
 
     private suspend fun person(name: String): AnalysisResult = coroutineScope {
-        require(name.length in 3..80 && name.matches(Regex("[\p{L}][\p{L} .’'\-]{1,78}[\p{L}]"))) {
+        require(name.length in 3..80 && name.matches(Regex("[\\p{L}][\\p{L} .’'\\-]{1,78}[\\p{L}]"))) {
             "Введите имя и фамилию (3–80 символов)."
         }
         // Search only public, non-sensitive mentions. Do not query addresses, private contacts,
         // relatives, whereabouts, or data-broker sources.
         val searches = listOf(
             "exact" to "\"$name\"",
-            "professional" to "\\"$name\\" (профессиональный профиль OR публикация OR конференция)",
-            "publications" to "\\"$name\\" (автор OR исследование OR статья OR ORCID)",
-            "news" to "\\"$name\\" (новости OR интервью OR событие)"
+            "professional" to "\"$name\" (профессиональный профиль OR публикация OR конференция)",
+            "publications" to "\"$name\" (автор OR исследование OR статья OR ORCID)",
+            "news" to "\"$name\" (новости OR интервью OR событие)"
         )
         val batches = searches.map { (label, query) ->
             async(Dispatchers.IO) { searchPublicMentions(query, label) }
@@ -139,7 +139,7 @@ object AnalysisEngine {
                 val details = buildString {
                     append(hit.url)
                     if (hit.snippet.isNotBlank()) append("\n").append(hit.snippet)
-                    append("\\nТип запроса: ").append(hit.queryLabel)
+                    append("\nТип запроса: ").append(hit.queryLabel)
                 }
                 findings += Finding("Открытая публикация " + (index + 1), hit.title, details, "info")
             }
