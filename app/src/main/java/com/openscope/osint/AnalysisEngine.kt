@@ -275,7 +275,13 @@ object AnalysisEngine {
         else findings += Finding("MX-записи", "Не обнаружены", "У домена не найден MX-ответ через публичный DNS-over-HTTPS.", "warn")
         val a = dns(host, "A")
         findings += Finding("DNS A", if (a.isEmpty()) "Нет ответа" else "Найдены", a.ifEmpty { listOf("A-записи не получены") }.joinToString("\n"), if (a.isEmpty()) "warn" else "info")
-        return AnalysisResult(address, "Email OSINT", "Проверен формат и публичная DNS-конфигурация домена $host", findings,
+        val spf = dns(host, "TXT").filter { it.contains("v=spf1", true) }
+        findings += Finding("SPF", if (spf.isEmpty()) "Не обнаружена" else "Найдена",
+            spf.ifEmpty { listOf("SPF TXT-запись не получена.") }.joinToString("\n"), if (spf.isEmpty()) "warn" else "good")
+        val dmarc = dns("_dmarc." + host, "TXT").filter { it.contains("v=DMARC1", true) }
+        findings += Finding("DMARC", if (dmarc.isEmpty()) "Не обнаружена" else "Найдена",
+            dmarc.ifEmpty { listOf("DMARC TXT-запись не получена.") }.joinToString("\n"), if (dmarc.isEmpty()) "warn" else "good")
+        return AnalysisResult(address, "Email OSINT", "Проверен формат, MX, SPF и DMARC домена $host", findings,
             "Проверка не подтверждает существование почтового ящика и не отправляет письмо. MX-записи показывают, что домен настроен принимать почту; это не гарантирует доставку или существование конкретного адреса.")
     }
 
@@ -289,10 +295,16 @@ object AnalysisEngine {
         val aaaa = dns(host, "AAAA")
         val mx = dns(host, "MX")
         val ns = dns(host, "NS")
+        val txt = dns(host, "TXT")
+        val caa = dns(host, "CAA")
         findings += Finding("IPv4 (A)", if (a.isEmpty()) "Не найдены" else a.joinToString(), "Публичные DNS-ответы Cloudflare.", if (a.isEmpty()) "warn" else "good")
         findings += Finding("IPv6 (AAAA)", if (aaaa.isEmpty()) "Не найдены" else aaaa.joinToString(), "Публичные DNS-ответы Cloudflare.")
         findings += Finding("Почтовые серверы (MX)", if (mx.isEmpty()) "Не найдены" else mx.joinToString(), "Публичные DNS-ответы Cloudflare.")
         findings += Finding("NS-серверы", if (ns.isEmpty()) "Не найдены" else ns.joinToString(), "Публичные DNS-ответы Cloudflare.")
+        findings += Finding("TXT-записи", if (txt.isEmpty()) "Не найдены" else txt.size.toString() + " записей",
+            txt.take(20).joinToString("\n").ifBlank { "TXT-записи не получены." })
+        findings += Finding("CAA-записи", if (caa.isEmpty()) "Не найдены" else caa.size.toString() + " записей",
+            caa.joinToString("\n").ifBlank { "CAA-записи не получены." })
         val rdap = getJson("https://rdap.org/domain/${URLEncoder.encode(host, "UTF-8")}")
         if (rdap != null) {
             val registrar = runCatching { rdap.getJSONArray("entities").optJSONObject(0)?.optString("handle").orEmpty() }.getOrDefault("")
