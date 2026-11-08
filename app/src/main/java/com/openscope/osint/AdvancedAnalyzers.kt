@@ -9,8 +9,12 @@ import java.net.URL
 object AdvancedAnalyzers {
     suspend fun ip(raw: String): AnalysisResult = withContext(Dispatchers.IO) {
         val address = raw.trim()
+        val ipv4Syntax = address.matches(Regex("""^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$""")) &&
+            address.split(".").all { it.toIntOrNull() in 0..255 }
+        val ipv6Syntax = address.contains(":") && address.matches(Regex("""^[0-9a-fA-F:.]+$"""))
+        require(ipv4Syntax || ipv6Syntax) { "Введите корректный IPv4 или IPv6 адрес, не доменное имя." }
         val parsed = runCatching { java.net.InetAddress.getByName(address) }.getOrNull()
-        require(parsed != null && (address.contains(".") || address.contains(":"))) { "Введите IPv4 или IPv6 адрес." }
+        require(parsed != null) { "Не удалось разобрать IP-адрес." }
         require(!parsed.isLoopbackAddress && !parsed.isAnyLocalAddress && !parsed.isLinkLocalAddress && !parsed.isSiteLocalAddress) { "Нужен публичный IP-адрес." }
         val findings = mutableListOf<Finding>()
         findings += Finding("IP", parsed.hostAddress ?: address, "Нормализованный адрес.", "good")
@@ -38,7 +42,17 @@ object AdvancedAnalyzers {
     suspend fun url(raw: String): AnalysisResult = withContext(Dispatchers.IO) {
         val input = if (raw.startsWith("http://") || raw.startsWith("https://")) raw else "https://" + raw
         val parsed = runCatching { URL(input) }.getOrNull()
-        require(parsed != null && parsed.protocol in listOf("http", "https") && parsed.host.contains(".")) { "Введите корректный URL или домен." }
+        require(parsed != null && parsed.protocol in listOf("http", "https") && parsed.host.contains(".") && parsed.userInfo == null) { "Введите корректный публичный URL или домен без логина и пароля." }
+        val host = parsed.host.lowercase()
+        require(host != "localhost" && !host.endsWith(".local") && !host.endsWith(".internal") && !host.endsWith(".lan")) {
+            "Локальные и внутренние адреса не проверяются."
+        }
+        val resolved = runCatching { java.net.InetAddress.getAllByName(host).toList() }.getOrElse {
+            throw IllegalArgumentException("Не удалось проверить публичный DNS-адрес хоста.")
+        }
+        require(resolved.isNotEmpty() && resolved.none {
+            it.isLoopbackAddress || it.isAnyLocalAddress || it.isLinkLocalAddress || it.isSiteLocalAddress || it.isMulticastAddress
+        }) { "URL ведёт на локальный или непубличный сетевой адрес; проверка заблокирована." }
         val findings = mutableListOf<Finding>()
         findings += Finding("Хост", parsed.host, "Домен из URL.", "good")
         findings += Finding("Протокол", parsed.protocol.uppercase(), "Схема URL.")
