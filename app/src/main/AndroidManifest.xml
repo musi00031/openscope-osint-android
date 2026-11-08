@@ -4,6 +4,8 @@
     <application
         android:allowBackup="false"
         android:label="OpenScope OSINT"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:supportsRtl="true"
         android:usesCleartextTraffic="false">
