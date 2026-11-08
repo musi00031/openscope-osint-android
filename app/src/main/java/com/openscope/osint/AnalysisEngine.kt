@@ -38,7 +38,7 @@ object AnalysisEngine {
     }
 
     private suspend fun username(name: String, context: Context): AnalysisResult = coroutineScope {
-        require(name.length in 3..80 && name.matches(Regex("[\\p{L}][\\p{L} .’'\\-]{1,78}[\\p{L}]"))) {
+        require(name.matches(Regex("[A-Za-z0-9._-]{2,30}"))) { "Никнейм: используйте 2–30 символов: латиница, цифры, точка, дефис или _." }
         val root = JSONObject(context.assets.open("wmn-data.json").bufferedReader().use { it.readText() })
         val allSites = root.getJSONArray("sites")
         val eligible = (0 until allSites.length()).mapNotNull { allSites.optJSONObject(it) }
@@ -105,77 +105,88 @@ object AnalysisEngine {
         } catch (_: Exception) { -1 to "" } finally { connection.disconnect() }
     }
 
-    private data class SearchHit(val title: String, val url: String, val snippet: String, val queryLabel: String)
+    private data class SearchHit(val title: String, val url: String, val snippet: String, val category: String)
 
     private suspend fun person(name: String): AnalysisResult = coroutineScope {
-        require(name.length in 3..80 && name.matches(Regex("[\\p{L}][\\p{L} .’'\\-]{1,78}[\\p{L}]"))) {
+        val cleanName = name.trim().replace(Regex("""\s+"""), " ")
+        require(cleanName.length in 3..80 && cleanName.matches(Regex("""[\p{L}][\p{L} .’'-]{1,78}[\p{L}]"""))) {
             "Введите имя и фамилию (3–80 символов)."
         }
-        // Search only public, non-sensitive mentions. Do not query addresses, private contacts,
-        // relatives, whereabouts, or data-broker sources.
-        val searches = listOf(
-            "exact" to "\"$name\"",
-            "professional" to "\"$name\" (профессиональный профиль OR публикация OR конференция)",
-            "publications" to "\"$name\" (автор OR исследование OR статья OR ORCID)",
-            "news" to "\"$name\" (новости OR интервью OR событие)"
+        // Public-interest search only: no private contact details, home addresses,
+        // family mapping, account access, or real-time location searches.
+        val queries = listOf(
+            "Точное совпадение" to "\"$cleanName\"",
+            "Профессиональные публикации" to "\"$cleanName\" (публикация OR конференция OR специалист OR автор)",
+            "Научные материалы" to "\"$cleanName\" (ORCID OR исследование OR университет OR журнал)",
+            "Новости и интервью" to "\"$cleanName\" (новости OR интервью OR пресс-релиз)"
         )
-        val batches = searches.map { (label, query) ->
-            async(Dispatchers.IO) { searchPublicMentions(query, label) }
-        }.awaitAll()
-        val all = batches.flatten()
+        val pages = queries.map { pair ->
+            async(Dispatchers.IO) { searchPublicPages(pair.first, pair.second) }
+        }.awaitAll().flatten()
         val unique = linkedMapOf<String, SearchHit>()
-        all.forEach { hit ->
-            val canonical = hit.url.substringBefore("#").trimEnd('/').lowercase(Locale.ROOT)
-            if (canonical.startsWith("https://") && canonical !in unique) unique[canonical] = hit
+        pages.forEach { hit ->
+            val key = hit.url.substringBefore("#").trimEnd('/').lowercase(Locale.ROOT)
+            if (key.startsWith("https://") && !unique.containsKey(key)) unique[key] = hit
         }
-        val hits = unique.values.take(24)
-        val byDomain = hits.groupingBy { runCatching { URL(it.url).host.removePrefix("www.") }.getOrDefault("источник") }.eachCount()
+        val hits = unique.values.take(30)
+        val domains = hits.groupingBy {
+            runCatching { URL(it.url).host.lowercase(Locale.ROOT).removePrefix("www.") }.getOrDefault("unknown")
+        }.eachCount()
         val findings = mutableListOf<Finding>()
         if (hits.isEmpty()) {
-            findings += Finding("Публичные упоминания", "Результаты не получены",
-                "Поисковая система не вернула доступные страницы. Это не доказывает отсутствие информации; возможны ограничения или блокировка выдачи.", "warn")
+            findings += Finding("Публичные упоминания", "Не получены",
+                "Поисковая система не вернула пригодные страницы. Возможны сетевые ограничения, блокировка выдачи или отсутствие индексируемых материалов.", "warn")
         } else {
             hits.forEachIndexed { index, hit ->
-                val details = buildString {
+                val detail = buildString {
                     append(hit.url)
-                    if (hit.snippet.isNotBlank()) append("\n").append(hit.snippet)
-                    append("\nТип запроса: ").append(hit.queryLabel)
+                    if (hit.snippet.isNotBlank()) {
+                        append("\nФрагмент: ")
+                        append(hit.snippet)
+                    }
+                    append("\nКатегория запроса: ")
+                    append(hit.category)
                 }
-                findings += Finding("Открытая публикация " + (index + 1), hit.title, details, "info")
+                findings += Finding("Результат " + (index + 1), hit.title, detail, "info")
             }
         }
-        findings += Finding("Источники", byDomain.size.toString() + " доменов",
-            byDomain.entries.sortedByDescending { it.value }.take(12).joinToString("\n") { "${it.key}: ${it.value}" }.ifBlank { "Домены не определены." })
-        findings += Finding("Методика", searches.size.toString() + " варианта публичного поиска",
-            "Точное имя, профессиональные публичные страницы, публикации и новостные упоминания. Результаты дедуплицированы по URL.")
-        AnalysisResult(name, "Поиск публичных упоминаний",
-            "Получено страниц: ${hits.size}; независимых доменов: ${byDomain.size}; поисковых вариантов: ${searches.size}. Личность не устанавливается.",
+        findings += Finding("Покрытие поиска", queries.size.toString() + " поисковых сценария",
+            "Точное имя, профессиональные страницы, научные публикации, новости и интервью.")
+        findings += Finding("Разнообразие источников", domains.size.toString() + " доменов",
+            domains.entries.sortedByDescending { it.value }.take(15)
+                .joinToString("\n") { it.key + ": " + it.value + " стр." }
+                .ifBlank { "Домены не определены." })
+        findings += Finding("Проверка совпадений", "Требуется ручная верификация",
+            "Сверяйте контекст, организацию, область деятельности и даты в независимых источниках. Совпадение имени само по себе не подтверждает личность.", "warn")
+        AnalysisResult(cleanName, "Публичные упоминания",
+            "Найдено страниц: " + hits.size + "; доменов: " + domains.size + "; сценариев поиска: " + queries.size,
             findings,
-            "Поиск расширен с одного точного запроса до нескольких тематических вариантов. Результаты содержат заголовок, фрагмент, домен и исходную ссылку. Это лишь публичные веб-упоминания: однофамильцы, тёзки и страницы о разных людях могут смешиваться. Совпадение имени, фотографии или домена не доказывает, что страницы относятся к одному человеку. Для проверки используйте контекст публикации и независимые источники. Модуль намеренно не ищет домашние адреса, частные контакты, родственников, местоположение или закрытые сведения. Имя передаётся поисковой системе DuckDuckGo.")
+            "Поиск выполняется по открытой веб-выдаче DuckDuckGo. Результаты дедуплицируются по URL и группируются по доменам. Это список публичных публикаций и упоминаний, а не установление личности. Однофамильцы и разные люди с одинаковым именем могут присутствовать одновременно. Уровень достоверности не повышается только из-за количества ссылок: важно проверить независимость источников и контекст каждой публикации. Запрос имени передаётся поисковой системе. Модуль не ищет домашние адреса, частные контакты, родственников, скрытые аккаунты или местоположение человека.")
     }
 
-    private suspend fun searchPublicMentions(query: String, label: String): List<SearchHit> {
+    private suspend fun searchPublicPages(category: String, query: String): List<SearchHit> {
         val address = "https://html.duckduckgo.com/html/?q=" + URLEncoder.encode(query, "UTF-8")
         val html = getText(address) ?: return emptyList()
-
-
-
         val output = mutableListOf<SearchHit>()
         val anchor = Regex("""(?is)<a\b([^>]*class=["'][^"']*result__a[^"']*["'][^>]*)>(.*?)</a>""")
-        val href = Regex("""(?is)href=["']([^"']+)["']""")
-        val snippet = Regex("""(?is)class=["'][^"']*result__snippet[^"']*["'][^>]*>(.*?)</(?:a|div)>""")
+        val hrefPattern = Regex("""(?is)href=["']([^"']+)["']""")
+        val snippetPattern = Regex("""(?is)class=["'][^"']*result__snippet[^"']*["'][^>]*>(.*?)</(?:a|div)>""")
         anchor.findAll(html).forEach { match ->
-            val rawHref = href.find(match.groupValues[1])?.groupValues?.get(1) ?: return@forEach
+            val rawHref = hrefPattern.find(match.groupValues[1])?.groupValues?.get(1) ?: return@forEach
             var target = decodeHtml(rawHref)
-            if (target.startsWith("//")) target = "https:$target"
-            if (target.contains("uddg=")) target = runCatching {
-                URLDecoder.decode(target.substringAfter("uddg=").substringBefore("&"), "UTF-8")
-            }.getOrDefault(target)
+            if (target.startsWith("//")) target = "https:" + target
+            if (target.contains("uddg=")) {
+                target = runCatching {
+                    URLDecoder.decode(target.substringAfter("uddg=").substringBefore("&"), "UTF-8")
+                }.getOrDefault(target)
+            }
             if (!target.startsWith("https://")) return@forEach
+            if (target.contains("duckduckgo.com")) return@forEach
             val title = stripHtml(match.groupValues[2])
-            val tail = html.substring((match.range.last + 1).coerceAtMost(html.length))
-            val excerpt = snippet.find(tail.take(1800))?.groupValues?.get(1)?.let { stripHtml(it) }.orEmpty()
-            if (title.isNotBlank() && !target.contains("duckduckgo.com")) output += SearchHit(title, target, excerpt, label)
+            val tailStart = (match.range.last + 1).coerceAtMost(html.length)
+            val tail = html.substring(tailStart, (tailStart + 2200).coerceAtMost(html.length))
+            val excerpt = snippetPattern.find(tail)?.groupValues?.get(1)?.let { stripHtml(it) }.orEmpty()
+            if (title.isNotBlank()) output += SearchHit(title, target, excerpt, category)
         }
         return output
     }
